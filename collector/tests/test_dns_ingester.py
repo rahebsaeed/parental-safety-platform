@@ -164,9 +164,11 @@ class TestDeviceIdResolution:
     def test_unknown_ip_gets_partial_visibility(self, tmp_path):
         db = _make_db(tmp_path)
         log = tmp_path / "dnsmasq.log"
+        # Loopback is the host talking to itself, never a LAN client, so it
+        # stays PARTIAL instead of growing a placeholder device.
         log.write_text(
-            _log_query("bypass.com", "10.99.99.99")  # never seen by Phase 1
-            + _log_query("flush.com", "10.99.99.99")
+            _log_query("bypass.com", "127.0.0.2")
+            + _log_query("flush.com", "127.0.0.2")
         )
         ingester = Ingester(log_path=log, db_path=db)
         ingester.process_new_lines()
@@ -180,6 +182,57 @@ class TestDeviceIdResolution:
         assert bypass_query is not None
         assert bypass_query.dns_visibility == "PARTIAL"
         assert bypass_query.device_id is None
+
+    def test_unknown_lan_ip_grows_placeholder_device(self, tmp_path):
+        """A never-scanned LAN client must be attributed from its first
+        query (the reported bug: new devices sat Unassigned for a day)."""
+        db = _make_db(tmp_path)
+        log = tmp_path / "dnsmasq.log"
+        log.write_text(
+            _log_query("newphone.com", "192.168.1.15")
+            + _log_query("flush.com", "192.168.1.15")
+        )
+        ingester = Ingester(log_path=log, db_path=db)
+        ingester.process_new_lines()
+
+        conn = storage.init_db(db)
+        try:
+            queries = storage.get_recent_dns_queries(conn, limit=10)
+            devices = storage.get_all_devices(conn)
+        finally:
+            conn.close()
+        new_query = next((q for q in queries if q.domain == "newphone.com"), None)
+        assert new_query is not None
+        assert new_query.dns_visibility == "FULL"
+        assert new_query.device_id is not None
+        placeholder = next(
+            (d for d in devices if d.device_id == new_query.device_id), None
+        )
+        assert placeholder is not None
+        assert placeholder.primary_mac is None
+        assert placeholder.confidence == "LOW"
+
+    def test_public_ip_never_grows_placeholder_device(self, tmp_path):
+        db = _make_db(tmp_path)
+        log = tmp_path / "dnsmasq.log"
+        log.write_text(
+            _log_query("weird.com", "8.8.8.8")
+            + _log_query("flush.com", "8.8.8.8")
+        )
+        ingester = Ingester(log_path=log, db_path=db)
+        ingester.process_new_lines()
+
+        conn = storage.init_db(db)
+        try:
+            queries = storage.get_recent_dns_queries(conn, limit=10)
+            devices = storage.get_all_devices(conn)
+        finally:
+            conn.close()
+        weird_query = next((q for q in queries if q.domain == "weird.com"), None)
+        assert weird_query is not None
+        assert weird_query.dns_visibility == "PARTIAL"
+        assert weird_query.device_id is None
+        assert devices == []
 
     def test_known_ip_gets_full_visibility(self, tmp_path):
         db = _make_db(tmp_path)
@@ -202,6 +255,66 @@ class TestDeviceIdResolution:
         assert full_query is not None
         assert full_query.dns_visibility == "FULL"
         assert full_query.device_id == device_id
+
+
+class TestPlaceholderAdoption:
+    def test_scan_enriches_placeholder_instead_of_duplicating(self, tmp_path, monkeypatch):
+        """End-to-end of the reported bug: unknown IP queries create a
+        placeholder; the next scan observing (same IP + MAC) must adopt the
+        MAC into that same device, not create a second one."""
+        from collector.device_discovery import arp_scan, discovery_service, router_clients
+        from collector.device_discovery.network_info import NetworkInfo
+
+        db = _make_db(tmp_path)
+        log = tmp_path / "dnsmasq.log"
+        log.write_text(
+            _log_query("newphone.com", "192.168.1.15")
+            + _log_query("flush.com", "192.168.1.15")
+        )
+        Ingester(log_path=log, db_path=db).process_new_lines()
+
+        conn = storage.init_db(db)
+        try:
+            (placeholder,) = storage.get_all_devices(conn)
+        finally:
+            conn.close()
+
+        monkeypatch.setattr(
+            arp_scan, "discover_hosts",
+            lambda *a, **k: arp_scan.DiscoveryResult(
+                neighbors=[], active_scan_attempted=True,
+                active_scan_succeeded=True, unavailable_reason=None,
+            ),
+        )
+        monkeypatch.setattr(
+            discovery_service.hostname_resolver, "resolve_hostname", lambda ip: None,
+        )
+        monkeypatch.setattr(
+            router_clients, "get_router_clients",
+            lambda: [router_clients.RouterClient(
+                ip="192.168.1.15", mac="4c:0f:6e:95:32:12", hostname="Ahmed-PC",
+            )],
+        )
+        network = NetworkInfo(
+            interface="eth0", local_ip="192.168.1.20", subnet_cidr="192.168.1.0/24",
+            gateway_ip="192.168.1.1", mac_address=None, ipv6_active=False,
+            ipv6_global_addresses=(),
+        )
+        conn = storage.init_db(db)
+        try:
+            summary = discovery_service.run_discovery_cycle(
+                conn, network, attempt_active=True,
+            )
+            devices = storage.get_all_devices(conn)
+            queries = storage.get_dns_queries_by_device(conn, placeholder.device_id)
+        finally:
+            conn.close()
+
+        assert summary.devices_seen == 1
+        assert len(devices) == 1  # no duplicate
+        assert devices[0].device_id == placeholder.device_id
+        assert (devices[0].primary_mac or "").lower() == "4c:0f:6e:95:32:12"
+        assert any(q.domain == "newphone.com" for q in queries)
 
 
 # ── flush_and_stop ─────────────────────────────────────────────────────────────

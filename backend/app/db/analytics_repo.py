@@ -127,27 +127,31 @@ def get_daily_timeline(
 def get_analytics_overview(
     session: Session,
     device_id: Optional[str] = None,
+    start_time: Optional[str] = None,
+    end_time: Optional[str] = None,
 ) -> dict:
     """Summary overview metrics for the network or a specific device."""
     q_base = session.query(DnsQuery)
     if device_id:
         q_base = q_base.filter(DnsQuery.device_id == device_id)
+    if start_time:
+        q_base = q_base.filter(DnsQuery.occurred_at >= start_time)
+    if end_time:
+        q_base = q_base.filter(DnsQuery.occurred_at <= end_time)
 
     total_queries = q_base.count()
-    distinct_domains = session.query(func.count(distinct(DnsQuery.domain)))
-    if device_id:
-        distinct_domains = distinct_domains.filter(DnsQuery.device_id == device_id)
+    distinct_domains = q_base.with_entities(func.count(distinct(DnsQuery.domain)))
     total_domains = distinct_domains.scalar() or 0
 
     active_devices = (
-        session.query(func.count(distinct(DnsQuery.device_id)))
+        q_base.with_entities(func.count(distinct(DnsQuery.device_id)))
         .filter(DnsQuery.device_id.isnot(None))
         .scalar()
         or 0
     )
 
     # Top category
-    cat_dist = get_category_distribution(session, device_id=device_id)
+    cat_dist = get_category_distribution(session, device_id=device_id, start_time=start_time, end_time=end_time)
     top_category = cat_dist[0]["category"] if cat_dist else "UNCATEGORIZED"
 
     return {

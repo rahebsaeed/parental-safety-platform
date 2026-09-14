@@ -207,6 +207,16 @@ def _last_hostname(conn: sqlite3.Connection, device_id: str) -> str | None:
     return row["hostname"] if row else None
 
 
+def _last_ip(conn: sqlite3.Connection, device_id: str) -> str | None:
+    row = conn.execute(
+        "SELECT ip_address FROM device_addresses "
+        "WHERE device_id = ? AND ip_address IS NOT NULL "
+        "ORDER BY observed_at DESC LIMIT 1",
+        (device_id,),
+    ).fetchone()
+    return row["ip_address"] if row else None
+
+
 def get_known_devices_for_matching(conn: sqlite3.Connection) -> list[KnownDevice]:
     """Build the minimal view identity.match_device() needs, for every
     stored device (online or offline — an offline device can still come
@@ -218,9 +228,25 @@ def get_known_devices_for_matching(conn: sqlite3.Connection) -> list[KnownDevice
             device_id=row["device_id"],
             primary_mac=row["primary_mac"],
             last_hostname=_last_hostname(conn, row["device_id"]),
+            last_ip=_last_ip(conn, row["device_id"]),
         )
         for row in rows
     ]
+
+
+def get_devices_with_recent_dns(conn: sqlite3.Connection, since_iso: str) -> set[str]:
+    """Device IDs with at least one DNS query at or after `since_iso`.
+
+    A query is proof of life: discovery treats these devices as present
+    even when a scan didn't observe them (quiet NIC, missed ARP), so an
+    active scan never marks a chatting device offline.
+    """
+    rows = conn.execute(
+        "SELECT DISTINCT device_id FROM dns_queries "
+        "WHERE device_id IS NOT NULL AND occurred_at >= ?",
+        (since_iso,),
+    ).fetchall()
+    return {row["device_id"] for row in rows}
 
 
 def _next_device_id(conn: sqlite3.Connection) -> str:
@@ -474,10 +500,16 @@ def resolve_device_id_for_ip(
     conn: sqlite3.Connection, source_ip: str
 ) -> str | None:
     """Look up the most recent device_id for a given source IP address by
-    joining against Phase 1's device_addresses history. Also checks
-    the devices table for devices whose most recent IP may have changed
-    due to DHCP reassignment. Returns None when the IP has never been
-    seen — this is the DoH/DoT bypass signal.
+    joining against Phase 1's device_addresses history. Returns None when
+    the IP has never been seen — this is the DoH/DoT bypass signal (stored
+    as dns_visibility='PARTIAL' / "Unassigned").
+
+    Deliberately exact-match only: a previous same-subnet fallback attributed
+    unknown IPs to whatever device was observed most recently, spraying one
+    device's queries across unrelated devices (e.g. 192.168.1.5's traffic
+    stamped dev_07 while dev_07 was at 192.168.1.6). A wrong device is worse
+    than an honest unknown — hourly discovery scans keep the mapping fresh
+    so the unknown window stays small.
     """
     row = conn.execute(
         "SELECT device_id FROM device_addresses "
@@ -486,17 +518,6 @@ def resolve_device_id_for_ip(
     ).fetchone()
     if row:
         return row[0]
-    # Fallback: match by any device_addresses entry in the same /24 subnet.
-    # This handles DHCP-leased devices whose IP has changed but is
-    # still in the same subnet as a known device.
-    recent = conn.execute(
-        """SELECT DISTINCT da.device_id FROM device_addresses da
-           WHERE da.ip_address LIKE ? || '%'
-           ORDER BY da.observed_at DESC""",
-        (source_ip.rsplit('.', 1)[0],),
-    ).fetchall()
-    if recent:
-        return recent[0][0]
     return None
 
 

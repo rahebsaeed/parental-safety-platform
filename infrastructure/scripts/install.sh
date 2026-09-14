@@ -19,7 +19,7 @@ set -euo pipefail
 INSTALL_ROOT="/opt/parental-safety"
 SERVICE_USER="parental-monitor"
 SERVICE_GROUP="parental-monitor"
-PROJECT_SRC="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 
 NGINX_SITES_AVAILABLE="/etc/nginx/sites-available"
 NGINX_SITES_ENABLED="/etc/nginx/sites-enabled"
@@ -234,8 +234,21 @@ for unit_file in "$INSTALL_ROOT/infrastructure/systemd/"*.service; do
     cp "$unit_file" "$SYSTEMD_DIR/$unit_name"
     ok "Installed $unit_name"
 done
+for unit_file in "$INSTALL_ROOT/infrastructure/systemd/"*.timer; do
+    [ -e "$unit_file" ] || continue
+    unit_name=$(basename "$unit_file")
+    cp "$unit_file" "$SYSTEMD_DIR/$unit_name"
+    ok "Installed $unit_name"
+done
 
 systemctl daemon-reload
+
+for timer in parental-monitor-scan.timer parental-monitor-ai-sync.timer; do
+    if [ -f "$SYSTEMD_DIR/$timer" ]; then
+        systemctl enable "$timer"
+        ok "Enabled $timer"
+    fi
+done
 
 for svc in "${SERVICES[@]}"; do
     systemctl enable "$svc"
@@ -263,3 +276,61 @@ echo "  Password:   cat $INSTALL_ROOT/.env | grep PARENT_PASSWORD"
 echo "  Logs:       journalctl -fu parental-monitor-collector"
 echo "              journalctl -fu parental-monitor-api"
 echo ""
+
+# 11. Router DNS automation --------------------------------------------
+# Guard service: dnsmasq DNS while the PC is up, router fallback on the way
+# down. A persistent guard (ExecStop) is stopped BEFORE NetworkManager at
+# shutdown, so the fallback still has a live network — the old
+# Before=shutdown.target starter raced WiFi teardown and usually lost.
+# Suspend/hibernate is covered by the system-sleep hook (network is still
+# up when pre-sleep hooks run). Logout needs nothing: the WiFi connection
+# is system-wide, so it survives logout.
+
+echo ""
+echo "  [Router DNS Automation]"
+
+if [ ! -f "/scripts/router-dns.sh" ]; then
+    if [ -f "/infrastructure/scripts/router-dns.sh" ]; then
+        cp "/infrastructure/scripts/router-dns.sh"            "/scripts/router-dns.sh" 2>/dev/null || true
+        chmod +x "/scripts/router-dns.sh" 2>/dev/null || true
+    fi
+fi
+
+cp "$PROJECT_ROOT/infrastructure/systemd/router-dns-guard.service" \
+    /etc/systemd/system/router-dns-guard.service 2>/dev/null || true
+cp "$PROJECT_ROOT/infrastructure/scripts/router-dns-sleep" \
+    /etc/systemd/system-sleep/router-dns 2>/dev/null || true
+chmod +x /etc/systemd/system-sleep/router-dns 2>/dev/null || true
+
+# Retire the racy on/off pair in favour of the guard.
+systemctl disable router-dns-on.service 2>/dev/null || true
+systemctl disable router-dns-off.service 2>/dev/null || true
+rm -f /etc/systemd/system/router-dns-on.service \
+    /etc/systemd/system/router-dns-off.service 2>/dev/null || true
+
+systemctl daemon-reload 2>/dev/null || true
+systemctl enable router-dns-guard.service 2>/dev/null || true
+echo "  Router DNS automation installed (guard + suspend hook)"
+
+# 12. NetworkManager dispatcher (WiFi lid close → set router DNS) ----
+log "Installing NetworkManager WiFi dispatcher..."
+NM_DISPATCHER_SRC="$PROJECT_ROOT/infrastructure/scripts/99-router-dns-switch"
+NM_DISPATCHER_DST="/etc/NetworkManager/dispatcher.d/99-router-dns-switch"
+if [ -f "$NM_DISPATCHER_SRC" ]; then
+    cp "$NM_DISPATCHER_SRC" "$NM_DISPATCHER_DST" 2>/dev/null || true
+    chmod +x "$NM_DISPATCHER_DST" 2>/dev/null || true
+    ok "NetworkManager dispatcher installed"
+else
+    warn "99-router-dns-switch not found, skipping"
+fi
+
+# 13. Systemd units ------------------------------------------------------
+log "Installing systemd service units..."
+
+# 14. Router DHCP client list script -------------------------------
+log "Installing router DHCP client list script..."
+if [ -f "/infrastructure/scripts/router-dhcp-clients.sh" ]; then
+    cp "/infrastructure/scripts/router-dhcp-clients.sh"        "/scripts/router-dhcp-clients.sh" 2>/dev/null || true
+    chmod +x "/scripts/router-dhcp-clients.sh" 2>/dev/null || true
+    ok "Router DHCP client list script installed"
+fi

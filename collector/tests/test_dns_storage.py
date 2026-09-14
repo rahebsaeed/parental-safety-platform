@@ -260,6 +260,15 @@ class TestResolveDeviceIdForIp:
     def test_returns_none_for_unknown_ip(self, conn):
         assert storage.resolve_device_id_for_ip(conn, "10.99.99.99") is None
 
+    def test_unknown_ip_in_known_subnet_is_not_attributed(self, conn_with_device):
+        """Regression test: an IP never seen in device_addresses must stay
+        unassigned even when the same /24 has known devices. A previous
+        same-subnet fallback stamped such queries with an unrelated
+        device_id (e.g. 192.168.1.5's traffic attributed to dev_07 while
+        dev_07 was at 192.168.1.6)."""
+        conn, device_id = conn_with_device  # owns 192.168.1.42
+        assert storage.resolve_device_id_for_ip(conn, "192.168.1.99") is None
+
     def test_returns_most_recent_device_for_ip(self, conn):
         """If two devices ever had the same IP (e.g. DHCP re-assignment),
         we get the most recent one.
@@ -284,6 +293,17 @@ class TestResolveDeviceIdForIp:
         )
         resolved = storage.resolve_device_id_for_ip(conn, "192.168.1.50")
         assert resolved == dev2
+
+
+class TestDevicesWithRecentDns:
+    def test_returns_devices_active_since_cutoff(self, conn_with_device):
+        conn, device_id = conn_with_device
+        storage.insert_dns_query(
+            conn, occurred_at="2026-09-14T13:00:00+00:00", source_ip="192.168.1.42",
+            device_id=device_id, domain="a.com", query_type="A",
+        )
+        assert storage.get_devices_with_recent_dns(conn, "2026-09-14T12:30:00+00:00") == {device_id}
+        assert storage.get_devices_with_recent_dns(conn, "2026-09-14T13:30:00+00:00") == set()
 
 
 # ── get_dns_visibility_summary ─────────────────────────────────────────────────

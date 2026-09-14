@@ -6,11 +6,16 @@ import type {
   DeviceDetail,
   DnsQuery,
   DomainClassification,
+  DomainSecurityResponse,
+  DangerousDomain,
+  SubjectResponse,
   HealthStatus,
+  RouterDnsStatus,
   HourlyActivityItem,
   SafetyAlert,
   TimelineItem,
   SessionInfo,
+  OpenRouterCategory,
 } from '../types/api';
 
 const BASE_URL = '/api';
@@ -33,35 +38,7 @@ async function fetchJson<T>(url: string, options?: RequestInit): Promise<T> {
 }
 
 export const api = {
-  // Auth
-  login: (password: string) =>
-    fetchJson<{ authenticated: boolean; token: string; expires_at: string }>(
-      `${BASE_URL}/auth/login`,
-      {
-        method: 'POST',
-        body: JSON.stringify({ password }),
-      }
-    ),
-  logout: () =>
-    fetchJson<{ authenticated: boolean; message: string }>(
-      `${BASE_URL}/auth/logout`,
-      { method: 'POST' }
-    ),
-  getAuthStatus: () =>
-    fetchJson<SessionInfo>(`${BASE_URL}/auth/status`),
-  changePassword: (current: string, newPassword: string) =>
-    fetchJson<{ success: boolean; message: string }>(
-      `${BASE_URL}/auth/change-password`,
-      {
-        method: 'POST',
-        body: JSON.stringify({ current_password: current, new_password: newPassword }),
-      }
-    ),
-
-  // System Health
   getHealth: () => fetchJson<HealthStatus>(`${BASE_URL}/health`),
-
-  // Devices
   getDevices: (status?: string) => {
     const params = status ? `?status=${status}` : '';
     return fetchJson<Device[]>(`${BASE_URL}/devices${params}`);
@@ -70,96 +47,126 @@ export const api = {
     fetchJson<DeviceDetail>(`${BASE_URL}/devices/${encodeURIComponent(deviceId)}`),
   updateDevice: (deviceId: string, payload: { friendly_name?: string; device_type?: string }) =>
     fetchJson<Device>(`${BASE_URL}/devices/${encodeURIComponent(deviceId)}`, {
-      method: 'PATCH',
-      body: JSON.stringify(payload),
+      method: 'PATCH', body: JSON.stringify(payload),
     }),
-  triggerScan: () =>
-    fetchJson<{ success: boolean; message: string; output: string }>(
-      `${BASE_URL}/devices/scan`,
-      { method: 'POST' }
-    ),
-
-  // DNS Activity (backend returns paginated {total,limit,offset,items})
-  getActivity: async (params: {
-    device_id?: string;
-    domain?: string;
-    visibility?: string;
-    status?: string;
-    limit?: number;
-    offset?: number;
-  }): Promise<DnsQuery[]> => {
-    const q = new URLSearchParams();
-    if (params.device_id) q.set('device_id', params.device_id);
-    if (params.domain) q.set('domain', params.domain);
-    if (params.visibility) q.set('visibility', params.visibility);
-    if (params.status) q.set('status', params.status);
-    if (params.limit) q.set('limit', String(params.limit));
-    if (params.offset) q.set('offset', String(params.offset));
-    const data = await fetchJson<DnsQuery[] | { items: DnsQuery[] }>(`${BASE_URL}/activity?${q.toString()}`);
-    return Array.isArray(data) ? data : (data.items ?? []);
+  getActivity: (params: { device_id?: string; domain?: string; visibility?: string; status?: string; limit?: number; offset?: number }) => {
+    const qp = new URLSearchParams();
+    if (params.device_id) qp.set('device_id', params.device_id);
+    if (params.domain) qp.set('domain', params.domain);
+    if (params.visibility) qp.set('visibility', params.visibility);
+    if (params.status) qp.set('status', params.status);
+    if (params.limit) qp.set('limit', String(params.limit));
+    if (params.offset) qp.set('offset', String(params.offset));
+    return fetchJson<DnsQuery[] | { items: DnsQuery[] }>(`${BASE_URL}/activity?${qp.toString()}`).then(
+      (res: unknown): DnsQuery[] => (Array.isArray(res) ? res : ((res as { items?: DnsQuery[] })?.items ?? [])),
+    );
   },
-
-  // Safety Alerts
   getAlerts: (params?: { status?: string; severity?: string; device_id?: string }) => {
-    const q = new URLSearchParams();
-    if (params?.status) q.set('status', params.status);
-    if (params?.severity) q.set('severity', params.severity);
-    if (params?.device_id) q.set('device_id', params.device_id);
-    return fetchJson<SafetyAlert[]>(`${BASE_URL}/alerts?${q.toString()}`);
+    const qp = new URLSearchParams();
+    if (params?.status) qp.set('status', params.status);
+    if (params?.severity) qp.set('severity', params.severity);
+    if (params?.device_id) qp.set('device_id', params.device_id);
+    return fetchJson<SafetyAlert[]>(`${BASE_URL}/alerts?${qp.toString()}`);
   },
   getAlertSummary: () => fetchJson<AlertSummary>(`${BASE_URL}/alerts/summary`),
   updateAlertStatus: (alertId: number, status: string) =>
-    fetchJson<SafetyAlert>(`${BASE_URL}/alerts/${alertId}`, {
-      method: 'PATCH',
-      body: JSON.stringify({ status }),
-    }),
-  triggerAlertScan: (limit = 1000) =>
-    fetchJson<{ scanned_queries: number; alerts_created: number; alerts_aggregated: number }>(
-      `${BASE_URL}/alerts/scan?limit=${limit}`,
-      { method: 'POST' }
-    ),
-
-  // Analytics
-  getAnalyticsOverview: (deviceId?: string) => {
-    const q = deviceId ? `?device_id=${encodeURIComponent(deviceId)}` : '';
-    return fetchJson<AnalyticsOverview>(`${BASE_URL}/analytics/overview${q}`);
+    fetchJson<SafetyAlert>(`${BASE_URL}/alerts/${alertId}`, { method: 'PATCH', body: JSON.stringify({ status }) }),
+  triggerScan: (limit = 1000) => fetchJson<{ scanned_queries: number; alerts_created: number; alerts_aggregated: number }>(`${BASE_URL}/alerts/scan?limit=${limit}`, { method: 'POST' }),
+  getAnalyticsOverview: (deviceId?: string, startTime?: string, endTime?: string) => {
+    const qp = new URLSearchParams();
+    if (deviceId) qp.set('device_id', deviceId);
+    if (startTime) qp.set('start_time', startTime);
+    if (endTime) qp.set('end_time', endTime);
+    return fetchJson<AnalyticsOverview>(`${BASE_URL}/analytics/overview${qp.toString() ? '?' + qp.toString() : ''}`);
   },
-  getCategoryDistribution: (deviceId?: string) => {
-    const q = deviceId ? `?device_id=${encodeURIComponent(deviceId)}` : '';
-    return fetchJson<CategoryDistributionResponse>(`${BASE_URL}/analytics/categories${q}`);
+  getCategoryDistribution: (deviceId?: string, startTime?: string, endTime?: string) => {
+    const qp = new URLSearchParams();
+    if (deviceId) qp.set('device_id', deviceId);
+    if (startTime) qp.set('start_time', startTime);
+    if (endTime) qp.set('end_time', endTime);
+    return fetchJson<CategoryDistributionResponse>(`${BASE_URL}/analytics/categories${qp.toString() ? '?' + qp.toString() : ''}`);
   },
-  getActiveHours: (deviceId?: string) => {
-    const q = deviceId ? `?device_id=${encodeURIComponent(deviceId)}` : '';
-    return fetchJson<{ disclaimer: string; hourly_distribution: HourlyActivityItem[] }>(
-      `${BASE_URL}/analytics/active-hours${q}`
-    );
+  getActiveHours: (deviceId?: string, startTime?: string, endTime?: string) => {
+    const qp = new URLSearchParams();
+    if (deviceId) qp.set('device_id', deviceId);
+    if (startTime) qp.set('start_time', startTime);
+    if (endTime) qp.set('end_time', endTime);
+    return fetchJson<{ disclaimer: string; hourly_distribution: HourlyActivityItem[] }>(`${BASE_URL}/analytics/active-hours${qp.toString() ? '?' + qp.toString() : ''}`);
   },
-  getTimeline: (days = 14, deviceId?: string) => {
-    const q = new URLSearchParams({ days: String(days) });
-    if (deviceId) q.set('device_id', deviceId);
-    return fetchJson<{ disclaimer: string; timeline: TimelineItem[] }>(
-      `${BASE_URL}/analytics/timeline?${q.toString()}`
-    );
+  getTimeline: (days = 14, deviceId?: string, startTime?: string, endTime?: string) => {
+    const qp = new URLSearchParams({ days: String(days) });
+    if (deviceId) qp.set('device_id', deviceId);
+    if (startTime) qp.set('start_time', startTime);
+    if (endTime) qp.set('end_time', endTime);
+    return fetchJson<{ disclaimer: string; timeline: TimelineItem[] }>(`${BASE_URL}/analytics/timeline?${qp.toString()}`);
   },
-
-  // Domain Classifications
   getClassifications: (category?: string, limit = 100) => {
-    const q = new URLSearchParams({ limit: String(limit) });
-    if (category) q.set('category', category);
-    return fetchJson<DomainClassification[]>(`${BASE_URL}/classifications/domains?${q.toString()}`);
+    const qp = new URLSearchParams({ limit: String(limit) });
+    if (category) qp.set('category', category);
+    return fetchJson<DomainClassification[]>(`${BASE_URL}/classifications/domains?${qp.toString()}`);
   },
   classifyDomains: (domains: string[]) =>
-    fetchJson<{ results: Array<{ domain: string; category: string; rule_type: string | null; pattern: string | null }> }>(
-      `${BASE_URL}/classifications/classify`,
-      { method: 'POST', body: JSON.stringify({ domains }) }
-    ),
-  syncClassifications: () =>
-    fetchJson<{ classified: number; message: string }>(`${BASE_URL}/classifications/sync`, {
-      method: 'POST',
-    }),
+    fetchJson<{ results: Array<{ domain: string; category: string; rule_type: string | null; pattern: string | null }> }>(`${BASE_URL}/classifications/classify`, { method: 'POST', body: JSON.stringify({ domains }) }),
+  syncClassifications: () => fetchJson<{ classified: number; ai_classified: number; still_unknown: number; no_api_key: boolean; message: string }>(`${BASE_URL}/classifications/sync`, { method: 'POST' }),
+  aiClassifyDomain: (domain: string) =>
+    fetchJson<DomainClassification>(`${BASE_URL}/classifications/ai-classify/${encodeURIComponent(domain)}`, { method: 'POST' }),
+  aiSyncClassifications: (limit = 25) => fetchJson<{ considered: number; ai_classified: number; still_unknown: number; no_api_key: boolean }>(`${BASE_URL}/classifications/ai-sync?limit=${limit}`, { method: 'POST' }),
   overrideClassification: (domain: string, category: string, note?: string) =>
-    fetchJson<DomainClassification>(`${BASE_URL}/classifications/domains/${encodeURIComponent(domain)}/override`, {
-      method: 'PUT',
-      body: JSON.stringify({ category, note }),
+    fetchJson<DomainClassification>(`${BASE_URL}/classifications/domains/${encodeURIComponent(domain)}/override`, { method: 'PUT', body: JSON.stringify({ category, note }) }),
+  getDomainSecurity: (deviceId?: string, limit = 20, startTime?: string, endTime?: string) => {
+    const qp = new URLSearchParams();
+    if (deviceId) qp.set('device_id', deviceId);
+    if (limit) qp.set('limit', String(limit));
+    if (startTime) qp.set('start_date', startTime);
+    if (endTime) qp.set('end_date', endTime);
+    return fetchJson<DomainSecurityResponse>(`${BASE_URL}/domains/security${qp.toString() ? '?' + qp.toString() : ''}`);
+  },
+  getDangerousDomains: (deviceId?: string, startTime?: string, endTime?: string) => {
+    const qp = new URLSearchParams();
+    if (deviceId) qp.set('device_id', deviceId);
+    if (startTime) qp.set('start_date', startTime);
+    if (endTime) qp.set('end_date', endTime);
+    return fetchJson<{ device_id: string | null; total_flagged: number; domains: DangerousDomain[] }>(`${BASE_URL}/domains/dangerous${qp.toString() ? '?' + qp.toString() : ''}`);
+  },
+  getSubjects: (deviceId?: string, startTime?: string, endTime?: string) => {
+    const qp = new URLSearchParams();
+    if (deviceId) qp.set('device_id', deviceId);
+    if (startTime) qp.set('start_date', startTime);
+    if (endTime) qp.set('end_date', endTime);
+    return fetchJson<SubjectResponse>(`${BASE_URL}/domains/subjects${qp.toString() ? '?' + qp.toString() : ''}`);
+  },
+  getTopDomains: (deviceId?: string, limit = 10, startTime?: string, endTime?: string) => {
+    const qp = new URLSearchParams();
+    if (deviceId) qp.set('device_id', deviceId);
+    if (limit) qp.set('limit', String(limit));
+    if (startTime) qp.set('start_date', startTime);
+    if (endTime) qp.set('end_date', endTime);
+    return fetchJson<{ domains: { domain: string; query_count: number }[] }>(`${BASE_URL}/domains/security${qp.toString() ? '?' + qp.toString() : ''}`);
+  },
+  getOpenRouterCategories: () => fetchJson<{categories: string[]}>(`${BASE_URL}/openrouter/categories`),
+  classifyDomainOpenRouter: (domain: string, force = false) => {
+    const qp = new URLSearchParams();
+    if (force) qp.set('force', 'true');
+    return fetchJson<{domain: string; category: string; confidence: number; reason: string; cached: boolean}>(`${BASE_URL}/openrouter/classify/${domain}${qp.toString() ? '?' + qp.toString() : ''}`);
+  },
+  classifyBatchOpenRouter: (domains: string[]) => fetchJson<{results: Record<string, {category: string; confidence: number; reason: string; cached: boolean}>}>(`${BASE_URL}/openrouter/classify-batch`, { method: 'POST', body: JSON.stringify({ domains }) }),
+  getOpenRouterApiKeyStatus: () => fetchJson<{configured: boolean; models?: Array<{model: string; preferred: boolean; cooling: boolean; retry_in: number}>}>(`${BASE_URL}/openrouter/api-key-status`),
+  saveOpenRouterApiKey: (key: string) => fetchJson<{message: string}>(`${BASE_URL}/openrouter/api-key`, { method: 'POST', body: JSON.stringify({ key }) }),
+  testOpenRouterApiKey: (key?: string) => fetchJson<{ok: boolean; label?: string | null; usage?: number | null; limit?: number | null; error?: string}>(`${BASE_URL}/openrouter/api-key/test`, { method: 'POST', body: JSON.stringify(key ? { key } : {}) }),
+  getTopDomainsByCategory: (deviceId?: string, limit = 20) => {
+    const qp = new URLSearchParams();
+    if (deviceId) qp.set('device_id', deviceId);
+    if (limit) qp.set('limit', String(limit));
+    return fetchJson<{categories: {category: string; domains: {domain: string; query_count: number}[]; total_queries: number}[]}>(`${BASE_URL}/openrouter/top-domains-by-category${qp.toString() ? '?' + qp.toString() : ''}`);
+  },
+  login: (password: string) => fetchJson<{ message: string }>(`${BASE_URL}/auth/login`, { method: 'POST', body: JSON.stringify({ password }) }),
+  changePassword: (currentPassword: string, newPassword: string) => fetchJson<{ message: string }>(`${BASE_URL}/auth/change-password`, { method: 'PUT', body: JSON.stringify({ currentPassword, newPassword }) }),
+  getAuthStatus: () => fetchJson<SessionInfo>(`${BASE_URL}/auth/status`),
+  logout: () => fetchJson<{ message: string }>(`${BASE_URL}/auth/logout`, { method: 'POST' }),
+  getRouterDnsStatus: () => fetchJson<RouterDnsStatus>(`${BASE_URL}/router-dns/status`),
+  setRouterDnsMode: (mode: 'dnsmasq' | 'router') =>
+    fetchJson<RouterDnsStatus>(`${BASE_URL}/router-dns/mode`, {
+      method: 'POST',
+      body: JSON.stringify({ mode }),
     }),
 };

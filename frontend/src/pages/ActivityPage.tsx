@@ -16,7 +16,7 @@ import { useRealtime } from '../hooks/useRealtime';
 import type { Device, DnsQuery, RealtimeEvent } from '../types/api';
 
 export const ActivityPage: React.FC = () => {
-  const [queries, setQueries] = useState<DnsQuery[]>([]);
+  const [queryList, setQueries] = useState<DnsQuery[]>([]);
   const [devices, setDevices] = useState<Device[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -55,7 +55,7 @@ export const ActivityPage: React.FC = () => {
         limit,
         offset,
       });
-      setQueries(data);
+      setQueries(Array.isArray(data) ? data : []);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to fetch DNS activity');
     } finally {
@@ -82,7 +82,7 @@ export const ActivityPage: React.FC = () => {
         if (selectedVisibility && newQuery.dns_visibility !== selectedVisibility) return;
         if (selectedStatus && newQuery.response_status !== selectedStatus) return;
 
-        setQueries((prev) => [newQuery, ...prev.slice(0, limit - 1)]);
+        setQueries((prev) => [newQuery, ...(Array.isArray(prev) ? prev.slice(0, limit - 1) : [])]);
       }
     },
     [offset, selectedDevice, searchDomain, selectedVisibility, selectedStatus, limit]
@@ -91,7 +91,7 @@ export const ActivityPage: React.FC = () => {
   useRealtime({ onEvent: handleRealtime });
 
   const handleNextPage = () => {
-    if (queries.length === limit) {
+    if (queryList.length === limit) {
       setOffset((prev) => prev + limit);
     }
   };
@@ -267,7 +267,7 @@ export const ActivityPage: React.FC = () => {
                   Loading DNS query activity...
                 </td>
               </tr>
-            ) : queries.length === 0 ? (
+            ) : queryList.length === 0 ? (
               <tr>
                 <td colSpan={7} style={{ textAlign: 'center', padding: '3rem', color: 'var(--text-muted)' }}>
                   <Radio size={32} style={{ marginBottom: '0.75rem', opacity: 0.5 }} />
@@ -275,7 +275,7 @@ export const ActivityPage: React.FC = () => {
                 </td>
               </tr>
             ) : (
-              queries.map((q) => (
+              queryList.map((q) => (
                 <tr key={q.id}>
                   <td style={{ whiteSpace: 'nowrap', fontFamily: 'var(--font-mono)', fontSize: '0.8125rem' }}>
                     {new Date(q.occurred_at).toLocaleString()}
@@ -336,7 +336,7 @@ export const ActivityPage: React.FC = () => {
             <option value={100}>100</option>
           </select>
           <span>
-            Showing queries {offset + 1} - {offset + queries.length}
+            Showing queryList {offset + 1} - {offset + queryList.length}
           </span>
         </div>
 
@@ -350,7 +350,7 @@ export const ActivityPage: React.FC = () => {
           </button>
           <button
             onClick={handleNextPage}
-            disabled={queries.length < limit || loading}
+            disabled={queryList.length < limit || loading}
             className="btn btn-secondary btn-sm"
           >
             Next <ChevronRight size={16} />

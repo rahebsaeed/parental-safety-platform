@@ -381,6 +381,8 @@ class Repository:
         conn: sqlite3.Connection,
         device_id: Optional[str] = None,
         limit: int = 20,
+        start_date: Optional[str] = None,
+        end_date: Optional[str] = None,
     ) -> list[TopDomainItem]:
         """Aggregate most requested domains across the whole network or for a single device."""
         query = """
@@ -391,9 +393,18 @@ class Repository:
             FROM dns_queries
         """
         params: list = []
+        conditions = []
         if device_id:
-            query += " WHERE device_id = ?"
+            conditions.append("device_id = ?")
             params.append(device_id)
+        if start_date:
+            conditions.append("occurred_at >= ?")
+            params.append(start_date)
+        if end_date:
+            conditions.append("occurred_at <= ?")
+            params.append(end_date)
+        if conditions:
+            query += " WHERE " + " AND ".join(conditions)
 
         query += " GROUP BY domain ORDER BY query_count DESC LIMIT ?;"
         params.append(max(1, min(limit, 100)))

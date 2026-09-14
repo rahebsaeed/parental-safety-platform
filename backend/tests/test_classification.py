@@ -119,6 +119,16 @@ class TestClassificationEngine:
     def test_classify_adult_content(self):
         assert classify("pornhub.com") == Category.ADULT_CONTENT
 
+    def test_classify_major_adult_tubes_without_ai(self):
+        # Well-known adult sites must resolve statically — instant,
+        # deterministic, and immune to AI rate limits.
+        for domain in [
+            "beeg.com", "www.beeg.com", "youjizz.com", "chaturbate.com",
+            "livejasmin.com", "stripchat.com", "brazzers.com",
+            "nhentai.net", "eporner.com", "porn.com",
+        ]:
+            assert classify(domain) == Category.ADULT_CONTENT, domain
+
     def test_classify_adult_gambling(self):
         assert classify("bet365.com") == Category.ADULT_CONTENT
 

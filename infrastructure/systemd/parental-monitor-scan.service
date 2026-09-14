@@ -1,0 +1,39 @@
+[Unit]
+Description=Parental Safety Platform — Hourly Device Discovery Scan
+Documentation=https://github.com/local/parental-safety-platform
+# Keeps the IP→device mapping fresh between DHCP reassignments so DNS
+# attribution doesn't go stale (an unmapped IP shows as "Unassigned" until
+# the next scan records it). Merges ARP neighbors with the router's DHCP
+# lease table; the router fetch needs no privileges, the active ARP scan
+# uses the ambient capabilities below when available and otherwise falls
+# back to passive-only.
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=parental-monitor
+Group=parental-monitor
+
+WorkingDirectory=/opt/parental-safety
+
+ExecStart=/opt/parental-safety/collector/.venv/bin/python \
+    -m collector.device_discovery.cli scan
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=parental-monitor-scan
+
+AmbientCapabilities=CAP_NET_RAW CAP_NET_ADMIN
+CapabilityBoundingSet=CAP_NET_RAW CAP_NET_ADMIN
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+ReadWritePaths=/opt/parental-safety/collector/data
+PrivateTmp=yes
+PrivateDevices=yes
+PrivateNetwork=no
+
+Environment=DISCOVERY_DB_PATH=/opt/parental-safety/collector/data/discovery.sqlite3
+Environment=DATABASE_PATH=/opt/parental-safety/collector/data/discovery.sqlite3
+EnvironmentFile=-/opt/parental-safety/.env

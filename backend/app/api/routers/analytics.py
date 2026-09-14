@@ -41,10 +41,12 @@ router = APIRouter(prefix="/analytics", tags=["Analytics"])
 @router.get("/overview", response_model=AnalyticsOverviewResponse)
 def get_analytics_overview(
     device_id: Optional[str] = Query(None, description="Optional filter by device ID"),
+    start_time: Optional[str] = Query(None, description="Start timestamp (ISO-8601)"),
+    end_time: Optional[str] = Query(None, description="End timestamp (ISO-8601)"),
     session: Session = Depends(get_session),
 ) -> AnalyticsOverviewResponse:
     """Return high-level activity overview with mandatory ethical disclaimer."""
-    data = repo.get_analytics_overview(session, device_id=device_id)
+    data = repo.get_analytics_overview(session, device_id=device_id, start_time=start_time, end_time=end_time)
     return AnalyticsOverviewResponse(device_id=device_id, **data)
 
 

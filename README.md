@@ -7,7 +7,7 @@ capabilities (no keylogging, message interception, webcam/mic capture,
 screen capture, or credential theft — see `docs/architecture/phase-1-discovery.md`
 for the full boundary).
 
-## Status: All 12 Phases Complete ✅
+## Status: All 17 Phases Complete ✅
 
 The full system is built, deployed, and running in production on
 Ubuntu `192.168.1.20` (`wlp0s20f3`, subnet `192.168.1.0/24`):
@@ -15,7 +15,7 @@ Ubuntu `192.168.1.20` (`wlp0s20f3`, subnet `192.168.1.0/24`):
 - **Phase 1** — Network discovery via ARP (active + passive) ✅
 - **Phase 2** — DNS observation via dnsmasq ✅
 - **Phase 3** — Device identity management (stable IDs, MAC randomization) ✅
-- **Phase 4** — Domain classification & safety alerts (184 rules) ✅
+- **Phase 4** — Domain classification & safety alerts (359 rules) ✅
 - **Phase 5** — Privacy scoring (full/partial visibility) ✅
 - **Phase 6** — Parental controls (pause, curfew, whitelist/blacklist) ✅
 - **Phase 7** — Device activity & history ✅
@@ -24,6 +24,11 @@ Ubuntu `192.168.1.20` (`wlp0s20f3`, subnet `192.168.1.0/24`):
 - **Phase 10** — Security (parent password, rate limits, CSRF, audit log) ✅
 - **Phase 11** — Systemd + nginx deployment (re-runnable install.sh) ✅
 - **Phase 12** — Tailscale remote access + authentication + device matching fix ✅
+- **Phase 13** — Password Change UI + On-Demand Scan ✅
+- **Phase 14** — DNS Resolver Reliability ✅
+- **Phase 15** — AI-assisted classification (OpenRouter free models → persisted rules) ✅
+- **Phase 16** — Safe-DNS failover control (header badge + switch, suspend/shutdown automation) ✅
+- **Phase 17** — Discovery hardening (router DHCP leases, DNS-driven placeholders, hourly scans) ✅
 
 See `docs/ROADMAP.md` for the full phase-by-phase plan, what's been
 confirmed about this specific network, and a running incident log.
@@ -72,13 +77,47 @@ are protected; the login page redirects unauthenticated users.
 
 | Service | Unit | Notes |
 |---|---|---|
-| DNS collector | `parental-monitor-collector` | dnsmasq + DNS ingestion |
-| Device discovery | `parental-monitor-discovery` | Periodic ARP scan |
+| DNS collector | `parental-monitor-collector` | dnsmasq tail + DNS ingestion |
 | API server | `parental-monitor-api` | FastAPI on `127.0.0.1:8000` |
 | Web server | `nginx` | Serves React + proxies `/api` on port 80 |
+| Hourly discovery scan | `parental-monitor-scan.timer` | ARP + router DHCP leases, keeps IP→device mapping fresh |
+| Hourly AI classification sync | `parental-monitor-ai-sync.timer` | Static rules, then top-20 unknowns to OpenRouter, persisted as rules |
+| Router DNS guard | `parental-monitor-guard` + `system-sleep/router-dns` + NM dispatcher | dnsmasq DNS while PC is up, router fallback on suspend/shutdown/WiFi-drop |
 
-Remote access via [Tailscale](https://tailscale.com) (`tailnet-root:200`).
+Remote access via [Tailscale](https://tailscale.com) (`100.99.54.78`).
 No router port-forwards exist.
+
+## AI-assisted classification
+
+Static rules (359 suffix/contains/regex entries) classify known domains
+instantly. Anything they miss goes to a free OpenRouter model, and the
+verdict is **persisted as a rule** — each unknown is an AI call exactly
+once, then cached forever:
+
+- Classifications page → sandbox **AI mode** (Ask AI + Save as rule) and
+  per-row **Ask AI** buttons for UNCATEGORIZED domains; Sync runs the
+  bulk AI pass and reports counts.
+- Every alert **Scan** refreshes classifications first, so a new adult
+  site is labeled `ADULT_CONTENT` *before* evaluation — it cannot slip
+  through as UNCATEGORIZED. `UNSAFE`/`GAMBLING` verdicts map to
+  `ADULT_CONTENT` (CRITICAL/HIGH alerts); manual overrides always win;
+  `UNKNOWN` verdicts stay retryable.
+- Free models rotate with per-model cooldowns when pools throttle
+  (`Settings → OpenRouter` shows the serving model); batch calls are
+  paced 5s apart. Key is entered in Settings, validated with Test, and
+  stored in the `settings` DB table — never in `.env` or git.
+
+## Router DNS failover
+
+Protection only works while the router advertises this PC (`192.168.1.20`)
+as DNS. The header on every dashboard page shows the router's **actual**
+reported DNS (green `rosa-PC` = filtered, amber `Router` = unfiltered)
+with a one-click switch (`GET/POST /api/router-dns/*`). Automation covers
+every PC state: boot and shutdown via `router-dns-guard.service`
+(ExecStop runs *before* NetworkManager stops, so the fallback still has
+network), suspend/hibernate via the `system-sleep` hook, WiFi drops via
+the NetworkManager dispatcher. Logout needs nothing — the WiFi
+connection is system-wide and survives it.
 
 ## Read next
 

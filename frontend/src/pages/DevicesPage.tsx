@@ -76,9 +76,13 @@ export const DevicesPage: React.FC<Props> = ({ onScan, scanning }) => {
 
   function localTime(iso: string): string {
     try {
-      return new Date(iso).toLocaleString(undefined, {
+      const d = new Date(iso);
+      if (isNaN(d.getTime())) return iso;
+      return d.toLocaleString(undefined, {
+        timeZoneName: 'short',
         year: 'numeric', month: 'short', day: 'numeric',
         hour: '2-digit', minute: '2-digit', second: '2-digit',
+        hour12: false,
       });
     } catch {
       return iso;

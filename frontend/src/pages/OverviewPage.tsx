@@ -18,9 +18,13 @@ import { EthicalBanner } from '../components/EthicalBanner';
 
 function localTime(iso: string): string {
   try {
-    return new Date(iso).toLocaleString(undefined, {
+    const d = new Date(iso);
+    if (isNaN(d.getTime())) return iso;
+    return d.toLocaleString(undefined, {
+      timeZoneName: 'short',
       year: 'numeric', month: 'short', day: 'numeric',
       hour: '2-digit', minute: '2-digit', second: '2-digit',
+      hour12: false,
     });
   } catch {
     return iso;
@@ -34,7 +38,7 @@ interface Props {
 export const OverviewPage: React.FC<Props> = ({ onNavigate }) => {
   const [overview, setOverview] = useState<AnalyticsOverview | null>(null);
   const [categories, setCategories] = useState<CategoryDistributionResponse | null>(null);
-  const [recentQueries, setRecentQueries] = useState<DnsQuery[]>([]);
+  const [overviewRecentQueryList, setRecentQueries] = useState<DnsQuery[]>([]);
   const [activeAlerts, setActiveAlerts] = useState<SafetyAlert[]>([]);
   const [devices, setDevices] = useState<Device[]>([]);
   const [loading, setLoading] = useState(true);
@@ -52,9 +56,9 @@ export const OverviewPage: React.FC<Props> = ({ onNavigate }) => {
         ]);
         setOverview(ov);
         setCategories(cat);
-        setRecentQueries(act);
-        setActiveAlerts(al);
-        setDevices(dev);
+        setRecentQueries(Array.isArray(act) ? act : []);
+        setActiveAlerts(Array.isArray(al) ? al : []);
+        setDevices(Array.isArray(dev) ? dev : []);
       } catch (err) {
         console.error('Failed to load overview data:', err);
       } finally {
@@ -156,7 +160,7 @@ export const OverviewPage: React.FC<Props> = ({ onNavigate }) => {
           </div>
 
           <div style={{ display: 'flex', flexDirection: 'column', gap: '0.625rem' }}>
-            {recentQueries.map((q) => (
+            {overviewRecentQueryList.map((q) => (
               <div
                 key={q.id}
                 style={{

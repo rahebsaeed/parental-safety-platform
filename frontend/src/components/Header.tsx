@@ -1,5 +1,6 @@
 import React from 'react';
 import { RefreshCw, Radio, LogOut } from 'lucide-react';
+import { RouterDnsControl } from './RouterDnsControl';
 
 interface Props {
   title: string;
@@ -52,6 +53,9 @@ export const Header: React.FC<Props> = ({
           <span className="status-dot-pulse" />
           <span>{isDaemonAlive ? 'DNS Observer Active' : 'Daemon Standby'}</span>
         </div>
+
+        {/* Router DNS mode + manual switch */}
+        <RouterDnsControl />
 
         {onRefresh && (
           <button

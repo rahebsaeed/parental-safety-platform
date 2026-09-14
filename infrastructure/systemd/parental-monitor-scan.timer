@@ -1,0 +1,12 @@
+[Unit]
+Description=Run Parental Safety device discovery scan hourly
+Documentation=https://github.com/local/parental-safety-platform
+
+[Timer]
+OnCalendar=hourly
+Persistent=true
+RandomizedDelaySec=5m
+Unit=parental-monitor-scan.service
+
+[Install]
+WantedBy=timers.target

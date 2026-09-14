@@ -46,6 +46,16 @@ export const ClassificationsPage: React.FC = () => {
     pattern: string | null;
   } | null>(null);
   const [testing, setTesting] = useState(false);
+  const [sandboxMode, setSandboxMode] = useState<'rules' | 'ai'>('rules');
+  const [aiVerdict, setAiVerdict] = useState<{
+    domain: string;
+    category: string;
+    confidence: number;
+    reason: string;
+    cached: boolean;
+  } | null>(null);
+  const [savingAi, setSavingAi] = useState(false);
+  const [aiRowLoading, setAiRowLoading] = useState<string | null>(null);
 
   // Override Modal state
   const [editingDomain, setEditingDomain] = useState<DomainClassification | null>(null);
@@ -76,12 +86,34 @@ export const ClassificationsPage: React.FC = () => {
   const handleTestClassifier = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!testDomainInput.trim()) return;
+    const domain = testDomainInput.trim();
     setTesting(true);
     setTestResult(null);
+    setAiVerdict(null);
     try {
-      const res = await api.classifyDomains([testDomainInput.trim()]);
-      if (res.results && res.results.length > 0) {
-        setTestResult(res.results[0]);
+      if (sandboxMode === 'ai') {
+        // Static verdict first (instant, local) so already-known domains
+        // like google.com are obviously safe; then ask the AI model
+        // (no DB write — use Save below to persist).
+        const [ruleRes, aiRes] = await Promise.all([
+          api.classifyDomains([domain]),
+          api.classifyDomainOpenRouter(domain),
+        ]);
+        if (ruleRes.results && ruleRes.results.length > 0) {
+          setTestResult(ruleRes.results[0]);
+        }
+        setAiVerdict({
+          domain: aiRes.domain,
+          category: aiRes.category,
+          confidence: aiRes.confidence,
+          reason: aiRes.reason,
+          cached: aiRes.cached,
+        });
+      } else {
+        const res = await api.classifyDomains([domain]);
+        if (res.results && res.results.length > 0) {
+          setTestResult(res.results[0]);
+        }
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Classifier test failed');
@@ -90,12 +122,40 @@ export const ClassificationsPage: React.FC = () => {
     }
   };
 
+  const handleSaveAiVerdict = async () => {
+    if (!aiVerdict) return;
+    setSavingAi(true);
+    try {
+      await api.aiClassifyDomain(aiVerdict.domain);
+      setAiVerdict(null);
+      setSyncResult(`AI verdict for ${aiVerdict.domain} saved as a rule — it will never show UNCATEGORIZED again.`);
+      fetchClassifications(true);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to save AI verdict');
+    } finally {
+      setSavingAi(false);
+    }
+  };
+
+  const handleAskAiForRow = async (domain: string) => {
+    setAiRowLoading(domain);
+    try {
+      await api.aiClassifyDomain(domain);
+      setSyncResult(`AI classified ${domain} — saved as a rule.`);
+      fetchClassifications(true);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : `AI classification failed for ${domain}`);
+    } finally {
+      setAiRowLoading(null);
+    }
+  };
+
   const handleSync = async () => {
     setSyncing(true);
     setSyncResult(null);
     try {
       const res = await api.syncClassifications();
-      setSyncResult(`Synced successfully! ${res.classified} unclassified domains resolved.`);
+      setSyncResult(res.message || `Synced successfully! ${res.classified} unclassified domains resolved.`);
       fetchClassifications(true);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Domain sync failed');
@@ -172,24 +232,93 @@ export const ClassificationsPage: React.FC = () => {
             </h2>
           </div>
           <p style={{ color: 'var(--text-secondary)', fontSize: '0.8125rem', marginBottom: '1rem' }}>
-            Test how the multi-tiered classification engine (exact match, domain suffix, regex keyword) evaluates any domain.
+            Test how the multi-tiered classification engine (exact match, domain suffix, regex keyword) evaluates any domain —
+            or ask the AI model for unknowns the rules don't cover.
           </p>
+
+          <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '0.75rem' }}>
+            <button
+              type="button"
+              onClick={() => setSandboxMode('rules')}
+              className={`btn btn-sm ${sandboxMode === 'rules' ? 'btn-primary' : 'btn-secondary'}`}
+            >
+              <Cpu size={14} /> Rules
+            </button>
+            <button
+              type="button"
+              onClick={() => setSandboxMode('ai')}
+              className={`btn btn-sm ${sandboxMode === 'ai' ? 'btn-primary' : 'btn-secondary'}`}
+              title="Ask the OpenRouter AI model (needs a key in Settings)"
+            >
+              <Sparkles size={14} /> AI
+            </button>
+          </div>
 
           <form onSubmit={handleTestClassifier} style={{ display: 'flex', gap: '0.5rem', marginBottom: '1rem' }}>
             <input
               type="text"
-              placeholder="e.g. tiktok.com, discord.gg, pornhub.com..."
+              placeholder={sandboxMode === 'ai' ? 'e.g. some-new-site.com...' : 'e.g. tiktok.com, discord.gg, pornhub.com...'}
               value={testDomainInput}
               onChange={(e) => setTestDomainInput(e.target.value)}
               className="form-input"
               style={{ flex: 1 }}
             />
             <button type="submit" disabled={testing || !testDomainInput.trim()} className="btn btn-primary btn-sm">
-              <Cpu size={14} /> {testing ? 'Testing...' : 'Classify'}
+              {sandboxMode === 'ai' ? <Sparkles size={14} /> : <Cpu size={14} />}{' '}
+              {testing ? 'Asking...' : sandboxMode === 'ai' ? 'Ask AI' : 'Classify'}
             </button>
           </form>
 
-          {testResult && (
+          {sandboxMode === 'ai' && aiVerdict && (
+            <div
+              style={{
+                background: 'rgba(15, 23, 42, 0.7)',
+                border: '1px solid var(--border-glass)',
+                borderRadius: 'var(--radius-md)',
+                padding: '1rem',
+                fontSize: '0.8125rem',
+              }}
+            >
+              {testResult && (
+                <div style={{ color: 'var(--text-secondary)', marginBottom: '0.5rem' }}>
+                  Static rules: <strong style={{ color: 'var(--text-primary)' }}>{testResult.category}</strong>
+                  {testResult.rule_type ? ` (${testResult.rule_type})` : ' (no match — this is why AI was asked)'}
+                </div>
+              )}
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.5rem' }}>
+                <span style={{ fontFamily: 'var(--font-mono)', fontWeight: 600 }}>{aiVerdict.domain}</span>
+                <span
+                  className="badge"
+                  style={{
+                    backgroundColor: `${getCategoryColor(aiVerdict.category)}22`,
+                    color: getCategoryColor(aiVerdict.category),
+                    borderColor: `${getCategoryColor(aiVerdict.category)}55`,
+                  }}
+                >
+                  {aiVerdict.category}
+                </span>
+              </div>
+              <div style={{ color: 'var(--text-secondary)', marginBottom: '0.75rem' }}>
+                {aiVerdict.confidence === 0 ? (
+                  <>AI temporarily unavailable (free-model rate limit) — your key and setup are fine. Wait a couple of minutes and press Ask AI again; nothing was saved.</>
+                ) : (
+                  <>AI verdict{aiVerdict.cached ? ' (cached)' : ''} • confidence{' '}
+                  {(aiVerdict.confidence * 100).toFixed(0)}% — {aiVerdict.reason}</>
+                )}
+              </div>
+              <button
+                type="button"
+                onClick={handleSaveAiVerdict}
+                disabled={savingAi || aiVerdict.category === 'UNKNOWN'}
+                className="btn btn-primary btn-sm"
+                title={aiVerdict.category === 'UNKNOWN' ? 'The AI could not categorize this domain — nothing to save' : 'Persist this verdict as a rule so it never shows UNCATEGORIZED again'}
+              >
+                <Save size={14} /> {savingAi ? 'Saving...' : 'Save as rule'}
+              </button>
+            </div>
+          )}
+
+          {sandboxMode === 'rules' && testResult && (
             <div
               style={{
                 background: 'rgba(15, 23, 42, 0.7)',
@@ -364,13 +493,26 @@ export const ClassificationsPage: React.FC = () => {
                     )}
                   </td>
                   <td>
-                    <button
-                      onClick={() => openOverrideModal(item)}
-                      className="btn btn-secondary btn-sm"
-                      title="Override category"
-                    >
-                      <Edit2 size={12} /> Edit
-                    </button>
+                    <div style={{ display: 'flex', gap: '0.375rem' }}>
+                      <button
+                        onClick={() => openOverrideModal(item)}
+                        className="btn btn-secondary btn-sm"
+                        title="Override category"
+                      >
+                        <Edit2 size={12} /> Edit
+                      </button>
+                      {item.category === 'UNCATEGORIZED' && !item.is_override && (
+                        <button
+                          onClick={() => handleAskAiForRow(item.domain)}
+                          disabled={aiRowLoading !== null}
+                          className="btn btn-secondary btn-sm"
+                          title="Classify with AI and save as a rule"
+                        >
+                          <Sparkles size={12} />{' '}
+                          {aiRowLoading === item.domain ? 'Asking...' : 'Ask AI'}
+                        </button>
+                      )}
+                    </div>
                   </td>
                 </tr>
               ))

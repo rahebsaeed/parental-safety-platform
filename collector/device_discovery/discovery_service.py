@@ -15,7 +15,7 @@ import sqlite3
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 
-from collector.device_discovery import arp_scan, hostname_resolver, identity, mac_vendor, storage
+from collector.device_discovery import arp_scan, hostname_resolver, identity, mac_vendor, router_clients, storage
 from collector.device_discovery.network_info import NetworkInfo
 
 logger = logging.getLogger(__name__)
@@ -87,61 +87,83 @@ def run_discovery_cycle(
     now_iso = _now_iso()
     known_devices = storage.get_known_devices_for_matching(conn)
     seen_ids: set[str] = set()
+    seen_mac_ip: set[tuple[str | None, str]] = set()
 
-    for neighbor in result.neighbors:
-        hostname = hostname_resolver.resolve_hostname(neighbor.ip)
-        vendor_label, mac_is_randomized = _describe_vendor(neighbor.mac, oui_database)
-
-        observation = identity.Observation(
-            ip=neighbor.ip, mac=neighbor.mac, hostname=hostname
-        )
+    def _ingest(ip: str, mac: str | None, hostname: str | None, source: str) -> None:
+        observation = identity.Observation(ip=ip, mac=mac, hostname=hostname)
         match = identity.match_device(observation, known_devices)
 
         if match.device_id is None:
             device_id = storage.create_device(
                 conn,
-                primary_mac=neighbor.mac,
+                primary_mac=mac,
                 mac_is_randomized=match.mac_is_randomized,
                 confidence=match.confidence.value,
                 now_iso=now_iso,
             )
             logger.info(
-                "device_detected device_id=%s ip=%s mac=%s confidence=%s reason=%s",
+                "device_detected device_id=%s ip=%s mac=%s confidence=%s reason=%s source=%s",
                 device_id,
-                neighbor.ip,
-                neighbor.mac,
+                ip,
+                mac,
                 match.confidence.value,
                 match.reason,
+                source,
             )
-            # So a second neighbor later in this same pass could still
+            # So a second observation later in this same pass could still
             # match against it, even though that shouldn't normally
             # happen for distinct IPs in one scan.
             known_devices.append(
                 identity.KnownDevice(
-                    device_id=device_id, primary_mac=neighbor.mac, last_hostname=hostname
+                    device_id=device_id, primary_mac=mac, last_hostname=hostname
                 )
             )
         else:
             device_id = match.device_id
             logger.debug(
-                "device_matched device_id=%s ip=%s confidence=%s reason=%s",
+                "device_matched device_id=%s ip=%s confidence=%s reason=%s source=%s",
                 device_id,
-                neighbor.ip,
+                ip,
                 match.confidence.value,
                 match.reason,
+                source,
             )
 
+        vendor_label, _ = _describe_vendor(mac, oui_database)
         storage.record_observation(
             conn,
             device_id=device_id,
-            ip_address=neighbor.ip,
-            mac_address=neighbor.mac,
+            ip_address=ip,
+            mac_address=mac,
             hostname=hostname,
             vendor=vendor_label,
             observed_at_iso=now_iso,
             confidence=match.confidence.value,
         )
         seen_ids.add(device_id)
+        seen_mac_ip.add(((mac or "").lower() or None, ip))
+
+    for neighbor in result.neighbors:
+        hostname = hostname_resolver.resolve_hostname(neighbor.ip)
+        _ingest(neighbor.ip, neighbor.mac, hostname, source="arp")
+
+    # The router's DHCP lease table sees devices ARP misses (phones in
+    # power-save, hosts absent from the OS ARP cache). Merge it here so a
+    # scan reflects everything the router itself reports. Best-effort twice
+    # over: get_router_clients() swallows network errors into [], and this
+    # guard covers any future change to that contract — a router hiccup must
+    # never fail a scan.
+    try:
+        router_leases = router_clients.get_router_clients()
+    except Exception as exc:
+        logger.warning("router_clients_unavailable error=%s", exc)
+        router_leases = []
+    for lease in router_leases:
+        key = ((lease.mac or "").lower() or None, lease.ip)
+        if key in seen_mac_ip:
+            continue
+        hostname = lease.hostname or hostname_resolver.resolve_hostname(lease.ip)
+        _ingest(lease.ip, lease.mac, hostname, source="router")
 
     # Only an ACTIVE scan is evidence that an unresponsive device is
     # actually gone. A passive-only pass just reflects what the OS
@@ -152,7 +174,20 @@ def run_discovery_cycle(
     # long-gone devices as online forever.
     newly_offline: list[str] = []
     if attempt_active and result.active_scan_succeeded:
-        newly_offline = storage.mark_offline_except(conn, seen_ids, now_iso)
+        # A device that asked DNS questions minutes ago is present even if
+        # this scan didn't observe it (quiet NIC, missed ARP) — asking is
+        # proof of life. Without this, active scans flap DNS-active hosts
+        # (e.g. a PC on a static IP) offline every hour.
+        now_dt = datetime.now(timezone.utc)
+        dns_cutoff = (now_dt - timedelta(minutes=30)).isoformat()
+        dns_active = storage.get_devices_with_recent_dns(conn, dns_cutoff)
+        present_ids = seen_ids | dns_active
+        if dns_active - seen_ids:
+            logger.info(
+                "devices_kept_online_by_dns count=%d",
+                len(dns_active - seen_ids),
+            )
+        newly_offline = storage.mark_offline_except(conn, present_ids, now_iso)
         for device_id in newly_offline:
             logger.info("device_offline device_id=%s", device_id)
     else:

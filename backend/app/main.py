@@ -15,11 +15,14 @@ from backend.app.api.routers import (
     devices_router,
     activity_router,
     domains_router,
+    domain_security_router,
     classification_router,
     alerts_router,
     analytics_router,
     realtime_router,
     auth_router,
+    router_dns_router,
+    openrouter_router,
 )
 
 
@@ -64,11 +67,14 @@ def create_app() -> FastAPI:
     app.include_router(devices_router, prefix=settings.API_V1_STR)
     app.include_router(activity_router, prefix=settings.API_V1_STR)
     app.include_router(domains_router, prefix=settings.API_V1_STR)
+    app.include_router(domain_security_router, prefix=settings.API_V1_STR)
     app.include_router(classification_router, prefix=settings.API_V1_STR)
     app.include_router(alerts_router, prefix=settings.API_V1_STR)
     app.include_router(analytics_router, prefix=settings.API_V1_STR)
     app.include_router(realtime_router, prefix=settings.API_V1_STR)
     app.include_router(auth_router, prefix=settings.API_V1_STR)
+    app.include_router(router_dns_router, prefix=settings.API_V1_STR)
+    app.include_router(openrouter_router, prefix=settings.API_V1_STR)
 
     @app.get("/", include_in_schema=False)
     def root() -> RedirectResponse:

@@ -1,0 +1,21 @@
+[Unit]
+Description=Guard router DNS: dnsmasq while PC is up, router fallback on shutdown
+Documentation=https://github.com/local/parental-safety-platform
+# Replaces the old router-dns-on/off pair. The off-service raced network
+# teardown at shutdown (WiFi already down when it ran). A persistent guard
+# instead: After=NetworkManager means systemd stops THIS unit BEFORE
+# NetworkManager during shutdown/reboot, so ExecStop still has a live
+# network to reach the router.
+After=network-online.target NetworkManager.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/opt/parental-safety/scripts/router-dns.sh on
+ExecStop=/opt/parental-safety/scripts/router-dns.sh off
+RemainAfterExit=yes
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

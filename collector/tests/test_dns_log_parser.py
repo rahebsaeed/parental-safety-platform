@@ -197,6 +197,21 @@ class TestTimestamps:
         entry = parse_lines(lines)[0]
         assert "2026-09-12" in entry.occurred_at
 
+    def test_log_timestamps_are_interpreted_as_local_time(self):
+        """dnsmasq logs in host-local time; occurred_at must be the same
+        instant in UTC, not the wall-clock stamped +00:00 (which put every
+        query an hour in the future on UTC+1 hosts)."""
+        from datetime import datetime, timezone
+
+        now_local = datetime.now().astimezone()
+        stamp = now_local.strftime("%d-%b-%Y %H:%M:%S")
+        lines = [
+            f"{stamp} dnsmasq[1234]: query[A] example.com from 192.168.1.10",
+        ]
+        entry = parse_lines(lines)[0]
+        parsed = datetime.fromisoformat(entry.occurred_at)
+        assert abs((parsed - datetime.now(timezone.utc)).total_seconds()) < 120
+
 
 # ── stateful parser flush ──────────────────────────────────────────────────────
 

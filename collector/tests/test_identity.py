@@ -120,3 +120,48 @@ def test_malformed_mac_is_treated_as_no_mac():
     )
     assert result.device_id is None
     assert result.confidence == Confidence.LOW
+
+
+def test_ip_only_placeholder_adopts_first_mac_seen_at_same_ip():
+    """The DNS ingester creates MAC-less placeholder devices for IPs no
+    scan has mapped yet. When a scan later observes a MAC at that same IP,
+    it must enrich the placeholder — not create a duplicate device."""
+    known = [
+        KnownDevice(device_id="dev_10", primary_mac=None, last_hostname=None,
+                    last_ip="192.168.1.15"),
+    ]
+    result = match_device(
+        Observation(ip="192.168.1.15", mac="4c:0f:6e:95:32:12", hostname="Ahmed-PC"),
+        known_devices=known,
+    )
+    assert result.device_id == "dev_10"
+    assert result.confidence == Confidence.MEDIUM
+
+
+def test_ip_adoption_does_not_fire_for_different_ip():
+    known = [
+        KnownDevice(device_id="dev_10", primary_mac=None, last_hostname=None,
+                    last_ip="192.168.1.15"),
+    ]
+    result = match_device(
+        Observation(ip="192.168.1.16", mac="4c:0f:6e:95:32:12", hostname=None),
+        known_devices=known,
+    )
+    assert result.device_id is None  # new device, not a merge
+
+
+def test_exact_mac_match_beats_ip_adoption():
+    """A MAC already claimed by a real device always matches its owner,
+    even if an IP-only placeholder sits at the observation IP."""
+    known = [
+        KnownDevice(device_id="dev_10", primary_mac=None, last_hostname=None,
+                    last_ip="192.168.1.15"),
+        KnownDevice(device_id="dev_03", primary_mac="AA:BB:CC:DD:EE:01",
+                    last_hostname=None),
+    ]
+    result = match_device(
+        Observation(ip="192.168.1.15", mac="aa:bb:cc:dd:ee:01", hostname=None),
+        known_devices=known,
+    )
+    assert result.device_id == "dev_03"
+    assert result.confidence == Confidence.HIGH

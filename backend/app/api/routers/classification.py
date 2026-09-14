@@ -101,14 +101,79 @@ def classify_domains(
 @router.post("/sync")
 def sync_classifications(
     session: Session = Depends(get_session),
+    ai: bool = Query(True, description="Also run the AI pass over remaining UNCATEGORIZED domains"),
+    ai_limit: int = Query(20, ge=1, le=100, description="Max UNCATEGORIZED domains for the AI pass"),
 ) -> dict:
     """Classify all domains in *dns_queries* that have no classification row.
 
-    Returns the number of newly classified domains.
+    Afterwards (unless ``ai=false``) the top UNCATEGORIZED domains by query
+    volume are sent to the OpenRouter model and persisted as rules, so they
+    never show UNCATEGORIZED again. Skipped gracefully when no API key is
+    configured.
     """
     count = repo.sync_unclassified(session)
+    ai_result: dict = {"ai_classified": 0, "still_unknown": 0, "no_api_key": True}
+    if ai:
+        try:
+            ai_result = repo.ai_sync_uncategorized(session, limit=ai_limit)
+        except Exception as exc:
+            # External API must never break local sync.
+            ai_result = {"ai_classified": 0, "still_unknown": 0, "no_api_key": False,
+                         "error": str(exc)[:200]}
     session.commit()
-    return {"classified": count, "message": f"Sync complete. {count} domain(s) classified."}
+    parts = [f"Sync complete. {count} domain(s) classified."]
+    if ai_result.get("error"):
+        parts.append(f"AI pass failed ({ai_result['error']}).")
+    elif ai_result.get("no_api_key"):
+        parts.append("AI pass skipped (no OpenRouter key).")
+    else:
+        parts.append(
+            f"AI resolved {ai_result.get('ai_classified', 0)} more; "
+            f"{ai_result.get('still_unknown', 0)} still unknown."
+        )
+    return {
+        "classified": count,
+        "ai_classified": ai_result.get("ai_classified", 0),
+        "still_unknown": ai_result.get("still_unknown", 0),
+        "no_api_key": ai_result.get("no_api_key", False),
+        "message": " ".join(parts),
+    }
+
+
+@router.post("/ai-classify/{domain:path}", response_model=DomainClassificationRead)
+def ai_classify_one_domain(
+    domain: str,
+    session: Session = Depends(get_session),
+) -> DomainClassificationRead:
+    """Classify one domain with the AI model and persist the verdict as a
+    rule, so it never shows UNCATEGORIZED again. Static rules are tried
+    first (no AI spend); manual overrides are never overwritten."""
+    try:
+        outcome = repo.ai_classify_domain(session, domain)
+    except RuntimeError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+    session.commit()
+    row = outcome["row"]
+    if row is None:
+        raise HTTPException(status_code=404, detail=f"No classification for '{domain}'")
+    session.refresh(row)
+    return DomainClassificationRead.model_validate(row)
+
+
+@router.post("/ai-sync")
+def ai_sync_classifications(
+    limit: int = Query(25, ge=1, le=100, description="Max UNCATEGORIZED domains to send to the AI model"),
+    session: Session = Depends(get_session),
+) -> dict:
+    """Dedicated AI pass: classify the top UNCATEGORIZED domains by query
+    volume with OpenRouter and persist verdicts as rules."""
+    try:
+        result = repo.ai_sync_uncategorized(session, limit=limit)
+    except Exception as exc:
+        session.rollback()
+        raise HTTPException(status_code=502, detail=f"AI sync failed: {exc}") from exc
+    session.commit()
+    return result
 
 
 # ---------------------------------------------------------------------------

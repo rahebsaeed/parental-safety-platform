@@ -1,0 +1,28 @@
+#!/bin/bash
+# =============================================================================
+# 99-router-dns-switch — NetworkManager dispatcher script
+# Automatically switches router DNS based on WiFi connectivity
+# =============================================================================
+# When WiFi connects → set router DNS to 192.168.1.20 (dnsmasq)
+# When WiFi disconnects → set router DNS to 192.168.1.1 (router)
+# =============================================================================
+
+INTERFACE="$1"
+ACTION="$2"
+WIFI_IFACE="wlp0s20f3"
+ROUTER_DNS_SCRIPT="/opt/parental-safety/scripts/router-dns.sh"
+
+if [ "$INTERFACE" != "$WIFI_IFACE" ]; then
+    exit 0
+fi
+
+case "$ACTION" in
+    up|dhcp4-up|dhcp6-up)
+        echo "[$(date)] WiFi connected → setting router DNS to 192.168.1.20"
+        "$ROUTER_DNS_SCRIPT" on 2>/dev/null &
+        ;;
+    down|pre-down)
+        echo "[$(date)] WiFi disconnected → setting router DNS to 192.168.1.1"
+        "$ROUTER_DNS_SCRIPT" off 2>/dev/null &
+        ;;
+esac

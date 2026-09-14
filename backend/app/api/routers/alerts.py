@@ -75,9 +75,34 @@ def get_alert_summary(
 @router.post("/scan", response_model=ScanResponse)
 def trigger_alert_scan(
     limit: int = Query(1000, ge=1, le=5000),
+    ai: bool = Query(True, description="Classify UNCATEGORIZED domains with AI before scanning"),
+    ai_limit: int = Query(20, ge=1, le=100, description="Max UNCATEGORIZED domains for the AI pass"),
     session: Session = Depends(get_session),
 ) -> ScanResponse:
-    """Scan recent DNS queries against all safety vectors and generate alerts."""
+    """Scan recent DNS queries against all safety vectors and generate alerts.
+
+    Classifications are refreshed first (static rules, then the bounded AI
+    pass) so a domain the rules don't know — e.g. a new adult site — is
+    labeled *before* evaluation instead of slipping through as
+    UNCATEGORIZED. The AI pass is skipped gracefully when no OpenRouter key
+    is configured, and its failures never break the scan.
+    """
+    import logging
+
+    from backend.app.db import classification_repo as class_repo
+
+    logger = logging.getLogger(__name__)
+    try:
+        class_repo.sync_unclassified(session)
+        if ai:
+            ai_result = class_repo.ai_sync_uncategorized(session, limit=ai_limit)
+            if ai_result.get("ai_classified"):
+                logger.info(
+                    "alert_scan_ai_classified count=%d still_unknown=%d",
+                    ai_result["ai_classified"], ai_result.get("still_unknown", 0),
+                )
+    except Exception as exc:
+        logger.warning("alert_scan_presync_failed error=%s", exc)
     result = repo.scan_queries_for_alerts(session, limit=limit)
     session.commit()
     return ScanResponse(**result)

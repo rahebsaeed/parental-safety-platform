@@ -49,6 +49,7 @@ class KnownDevice:
     device_id: str
     primary_mac: str | None
     last_hostname: str | None
+    last_ip: str | None = None
 
 
 @dataclass(frozen=True)
@@ -127,6 +128,30 @@ def match_device(
                         f"MAC did not match, but hostname "
                         f"'{observation.hostname}' matches a known device — "
                         "treat with some caution"
+                    ),
+                    mac_is_randomized=mac_is_randomized,
+                )
+
+    # 2b. IP-adoption: the observation carries a MAC, and a known device
+    # has no MAC yet but was last seen at this same IP (an IP-only
+    # placeholder created by the DNS ingester for a never-scanned host).
+    # Adopt the MAC into that record instead of duplicating the device.
+    # Runs after the exact-MAC rule, so a MAC already claimed by another
+    # device still matches its true owner first.
+    if normalized_mac and observation.ip:
+        for known in known_devices:
+            if (
+                known.primary_mac is None
+                and known.last_ip
+                and known.last_ip.strip() == observation.ip.strip()
+            ):
+                return MatchResult(
+                    device_id=known.device_id,
+                    confidence=Confidence.MEDIUM,
+                    reason=(
+                        f"MAC {normalized_mac} first seen at {observation.ip}, "
+                        f"adopting it into IP-only device {known.device_id} — "
+                        "treat with some caution until re-observed"
                     ),
                     mac_is_randomized=mac_is_randomized,
                 )

@@ -8,6 +8,11 @@ import {
   RefreshCw,
   FileSpreadsheet,
   FileCode,
+  Shield,
+  AlertTriangle,
+  CheckCircle,
+  Eye,
+  Search,
 } from 'lucide-react';
 import { api } from '../services/api';
 import { EthicalBanner } from '../components/EthicalBanner';
@@ -17,20 +22,54 @@ import type {
   Device,
   HourlyActivityItem,
   TimelineItem,
+  DomainSecurityResponse,
+  DangerousDomain,
+  SubjectResponse,
 } from '../types/api';
+
+const toLocalDateStr = (d: Date): string => {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+};
+
+/** Default time frame: the last day (yesterday → today). Cleared = all time. */
+const defaultStartDate = (): string => {
+  const d = new Date();
+  d.setDate(d.getDate() - 1);
+  return toLocalDateStr(d);
+};
+
+const defaultEndDate = (): string => toLocalDateStr(new Date());
 
 export const AnalyticsPage: React.FC = () => {
   const [devices, setDevices] = useState<Device[]>([]);
   const [selectedDevice, setSelectedDevice] = useState<string>('');
+  const [startDate, setStartDate] = useState<string>(defaultStartDate);
+  const [endDate, setEndDate] = useState<string>(defaultEndDate);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [activeTab, setActiveTab] = useState<'overview' | 'security'>('overview');
 
   // Analytics states
   const [overview, setOverview] = useState<AnalyticsOverview | null>(null);
   const [categories, setCategories] = useState<CategoryDistributionItem[]>([]);
   const [hourly, setHourly] = useState<HourlyActivityItem[]>([]);
   const [timeline, setTimeline] = useState<TimelineItem[]>([]);
+  const [analyticsTopDomainList, setTopDomains] = useState<{ domain: string; query_count: number }[]>([]);
+
+  // Domain security states
+  const [domainSecurity, setDomainSecurity] = useState<DomainSecurityResponse | null>(null);
+  const [dangerousDomains, setDangerousDomains] = useState<DangerousDomain[]>([]);
+  const [subjects, setSubjects] = useState<SubjectResponse | null>(null);
+  const [aiReady, setAiReady] = useState<boolean | null>(null);
+
+  // Day-bounded range: a bare "YYYY-MM-DD" end would exclude that whole day
+  // under lexicographic ISO comparison, so pin to full local days.
+  const startTime = startDate ? `${startDate}T00:00:00` : undefined;
+  const endTime = endDate ? `${endDate}T23:59:59` : undefined;
 
   const fetchDevices = async () => {
     try {
@@ -52,24 +91,51 @@ export const AnalyticsPage: React.FC = () => {
     const devId = selectedDevice || undefined;
 
     try {
-      const [ovData, catData, hrData, tlData] = await Promise.all([
-        api.getAnalyticsOverview(devId),
-        api.getCategoryDistribution(devId),
-        api.getActiveHours(devId),
-        api.getTimeline(14, devId),
+      const [ovData, catData, hrData, tlData, analyticsTopDomainListData] = await Promise.all([
+        api.getAnalyticsOverview(devId, startTime, endTime),
+        api.getCategoryDistribution(devId, startTime, endTime),
+        api.getActiveHours(devId, startTime, endTime),
+        api.getTimeline(14, devId, startTime, endTime),
+        api.getTopDomains(devId, 10, startTime, endTime),
       ]);
 
       setOverview(ovData);
       setCategories(catData.categories || []);
       setHourly(hrData.hourly_distribution || []);
       setTimeline(tlData.timeline || []);
+      setTopDomains(analyticsTopDomainListData.domains || []);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load network analytics');
     } finally {
       setLoading(false);
       setRefreshing(false);
     }
-  }, [selectedDevice]);
+  }, [selectedDevice, startTime, endTime]);
+
+  const fetchDomainSecurity = useCallback(async () => {
+    const devId = selectedDevice || undefined;
+    try {
+      const [secData, dangerData, subjData] = await Promise.all([
+        api.getDomainSecurity(devId, 15, startTime, endTime),
+        api.getDangerousDomains(devId, startTime, endTime),
+        api.getSubjects(devId, startTime, endTime),
+      ]);
+      setDomainSecurity(secData);
+      setDangerousDomains(dangerData.domains || []);
+      setSubjects(subjData);
+    } catch {
+      // Non-blocking
+    }
+  }, [selectedDevice, startTime, endTime]);
+
+  const fetchAiStatus = useCallback(async () => {
+    try {
+      const data = await api.getOpenRouterApiKeyStatus();
+      setAiReady(data.configured);
+    } catch {
+      setAiReady(null);
+    }
+  }, []);
 
   useEffect(() => {
     fetchDevices();
@@ -79,12 +145,21 @@ export const AnalyticsPage: React.FC = () => {
     fetchAnalytics();
   }, [fetchAnalytics]);
 
+  useEffect(() => {
+    if (activeTab === 'security') {
+      fetchDomainSecurity();
+      fetchAiStatus();
+    }
+  }, [activeTab, fetchDomainSecurity, fetchAiStatus]);
+
   const maxHourlyCount = Math.max(...hourly.map((h) => h.query_count), 1);
   const maxTimelineCount = Math.max(...timeline.map((t) => t.query_count), 1);
 
   const getExportUrl = (format: 'csv' | 'json') => {
     const params = new URLSearchParams();
     if (selectedDevice) params.set('device_id', selectedDevice);
+    if (startTime) params.set('start_time', startTime);
+    if (endTime) params.set('end_time', endTime);
     const queryString = params.toString() ? `?${params.toString()}` : '';
     return `/api/analytics/export/${format}${queryString}`;
   };
@@ -123,6 +198,26 @@ export const AnalyticsPage: React.FC = () => {
         </div>
 
         <div style={{ display: 'flex', gap: '0.75rem', alignItems: 'center' }}>
+          <label style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
+            From
+            <input
+              type="date"
+              className="form-select"
+              value={startDate}
+              onChange={(e) => setStartDate(e.target.value)}
+              style={{ width: '140px', marginLeft: '4px' }}
+            />
+          </label>
+          <label style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
+            To
+            <input
+              type="date"
+              className="form-select"
+              value={endDate}
+              onChange={(e) => setEndDate(e.target.value)}
+              style={{ width: '140px', marginLeft: '4px' }}
+            />
+          </label>
           <button
             onClick={() => fetchAnalytics(true)}
             disabled={refreshing}
@@ -140,6 +235,29 @@ export const AnalyticsPage: React.FC = () => {
         </div>
       )}
 
+      {/* Tab toggle */}
+      <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '1.5rem' }}>
+        <button
+          onClick={() => setActiveTab('overview')}
+          className={`btn btn-sm ${activeTab === 'overview' ? 'btn-primary' : 'btn-secondary'}`}
+        >
+          <Layers size={14} /> Overview
+        </button>
+        <button
+          onClick={() => setActiveTab('security')}
+          className={`btn btn-sm ${activeTab === 'security' ? 'btn-primary' : 'btn-secondary'}`}
+        >
+          <Shield size={14} /> Domain Security
+          {aiReady === true ? (
+            <span className="badge badge-success" style={{ marginLeft: 6 }}>AI on</span>
+          ) : aiReady === false ? (
+            <span className="badge badge-warning" style={{ marginLeft: 6 }}>AI off</span>
+          ) : null}
+        </button>
+      </div>
+
+      {activeTab === 'overview' && (
+      <>
       {/* Metric Cards */}
       <div className="stats-grid">
         <div className="glass-card">
@@ -168,6 +286,32 @@ export const AnalyticsPage: React.FC = () => {
           <div className="card-subtext">Highest relative request share</div>
         </div>
       </div>
+
+      {/* Top Domains in Overview */}
+      {activeTab === 'overview' && analyticsTopDomainList.length > 0 && (
+        <div className="glass-card" style={{ marginBottom: '1.75rem' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '1.25rem' }}>
+            <Eye size={18} color="var(--primary-light)" />
+            <h2 style={{ fontFamily: 'var(--font-display)', fontSize: '1.125rem', fontWeight: 600 }}>
+              Most Visited Domains
+            </h2>
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
+            {analyticsTopDomainList.slice(0, 10).map((d, i) => (
+              <div key={i} style={{
+                display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+                padding: '0.5rem 0.75rem', borderBottom: '1px solid var(--border-subtle)',
+              }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                  <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)', width: '24px' }}>#{i + 1}</span>
+                  <span style={{ fontFamily: 'var(--font-mono)', fontSize: '0.8125rem' }}>{d.domain}</span>
+                </div>
+                <span style={{ fontFamily: 'var(--font-mono)', fontSize: '0.8125rem' }}>{d.query_count} queries</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* 24-Hour Activity Histogram */}
       <div className="glass-card" style={{ marginBottom: '1.75rem' }}>
@@ -366,6 +510,187 @@ export const AnalyticsPage: React.FC = () => {
           <div style={{ height: '24px' }} />
         </div>
       </div>
+      </>
+      )}
+
+      {activeTab === 'security' && (
+      <>
+      {/* AI status banner — this is how you know the AI is working */}
+      <div className="glass-card" style={{ marginBottom: '1.5rem' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+          <Shield size={18} color="var(--primary-light)" />
+          <h2 style={{ fontFamily: 'var(--font-display)', fontSize: '1.125rem', fontWeight: 600 }}>
+            AI Categorization
+          </h2>
+          {aiReady === true ? (
+            <span className="badge badge-success">ON</span>
+          ) : aiReady === false ? (
+            <span className="badge badge-warning">OFF</span>
+          ) : (
+            <span className="badge badge-muted">checking…</span>
+          )}
+        </div>
+        <p style={{ color: 'var(--text-secondary)', fontSize: '0.8125rem', marginTop: '0.5rem', marginBottom: 0 }}>
+          {aiReady === true
+            ? 'OpenRouter key is saved — unknown domains below were classified by the AI model.'
+            : aiReady === false
+            ? 'No OpenRouter key saved — unknown domains stay uncategorized. Add one in Settings → OpenRouter AI Category Engine, then press Test.'
+            : 'Checking whether an OpenRouter key is configured…'}
+        </p>
+      </div>
+
+      {/* Security summary */}
+      <div className="stats-grid">
+        <div className="glass-card">
+          <div className="card-title">Domains Seen</div>
+          <div className="card-value">{domainSecurity ? domainSecurity.total_domains.toLocaleString() : '—'}</div>
+          <div className="card-subtext">In selected time frame</div>
+        </div>
+
+        <div className="glass-card">
+          <div className="card-title">Safe</div>
+          <div className="card-value" style={{ color: '#4caf50' }}>{domainSecurity ? domainSecurity.summary.safe : '—'}</div>
+          <div className="card-subtext"><CheckCircle size={14} /> Benign endpoints</div>
+        </div>
+
+        <div className="glass-card">
+          <div className="card-title">Risky</div>
+          <div className="card-value" style={{ color: '#ff9800' }}>{domainSecurity ? domainSecurity.summary.risky : '—'}</div>
+          <div className="card-subtext"><AlertTriangle size={14} /> Review recommended</div>
+        </div>
+
+        <div className="glass-card">
+          <div className="card-title">Dangerous</div>
+          <div className="card-value" style={{ color: '#f44336' }}>{domainSecurity ? domainSecurity.summary.dangerous : '—'}</div>
+          <div className="card-subtext"><AlertTriangle size={14} /> Block / discuss</div>
+        </div>
+      </div>
+
+      {/* Flagged domains */}
+      <div className="glass-card" style={{ marginBottom: '1.75rem' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '1.25rem' }}>
+          <AlertTriangle size={18} color="#ff9800" />
+          <h2 style={{ fontFamily: 'var(--font-display)', fontSize: '1.125rem', fontWeight: 600 }}>
+            Flagged Domains{dangerousDomains.length > 0 ? ` (${dangerousDomains.length})` : ''}
+          </h2>
+        </div>
+
+        {dangerousDomains.length === 0 ? (
+          <div style={{ textAlign: 'center', padding: '2rem', color: 'var(--text-muted)' }}>
+            No risky or dangerous domains in this time frame.
+          </div>
+        ) : (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+            {dangerousDomains.map((d) => (
+              <div
+                key={d.domain}
+                style={{
+                  display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+                  gap: '1rem', padding: '0.625rem 0.875rem',
+                  background: 'rgba(15, 23, 42, 0.4)', borderRadius: 'var(--radius-md)',
+                  fontSize: '0.8125rem',
+                }}
+              >
+                <div style={{ minWidth: 0 }}>
+                  <div style={{ fontFamily: 'var(--font-mono)', fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    {d.domain}
+                  </div>
+                  <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
+                    {d.subject} • {d.reason}
+                  </div>
+                </div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', whiteSpace: 'nowrap' }}>
+                  <span className="badge" style={{ background: `${d.security_color}22`, color: d.security_color }}>
+                    {d.security_label}
+                  </span>
+                  <span style={{ fontFamily: 'var(--font-mono)' }}>{d.query_count}</span>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* Subjects */}
+      <div className="glass-card" style={{ marginBottom: '1.75rem' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '1.25rem' }}>
+          <Search size={18} color="var(--primary-light)" />
+          <h2 style={{ fontFamily: 'var(--font-display)', fontSize: '1.125rem', fontWeight: 600 }}>
+            What They Are Exploring
+          </h2>
+        </div>
+
+        {!subjects || subjects.subjects.length === 0 ? (
+          <div style={{ textAlign: 'center', padding: '2rem', color: 'var(--text-muted)' }}>
+            No subject data in this time frame.
+          </div>
+        ) : (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+            {subjects.subjects.map((s) => (
+              <div key={s.subject}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.8125rem', marginBottom: '0.375rem' }}>
+                  <span style={{ fontWeight: 600, color: 'var(--text-primary)' }}>{s.subject}</span>
+                  <span style={{ color: 'var(--text-secondary)', fontFamily: 'var(--font-mono)' }}>
+                    {s.query_count.toLocaleString()} queries
+                  </span>
+                </div>
+                <div style={{ height: '8px', width: '100%', background: 'rgba(255, 255, 255, 0.06)', borderRadius: 'var(--radius-full)', overflow: 'hidden' }}>
+                  <div
+                    style={{
+                      height: '100%',
+                      width: `${subjects.total_queries > 0 ? (s.query_count / subjects.total_queries) * 100 : 0}%`,
+                      background: 'var(--primary)',
+                      borderRadius: 'var(--radius-full)',
+                    }}
+                  />
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* Top domains by security level */}
+      <div className="glass-card" style={{ marginBottom: '1.75rem' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '1.25rem' }}>
+          <Eye size={18} color="var(--primary-light)" />
+          <h2 style={{ fontFamily: 'var(--font-display)', fontSize: '1.125rem', fontWeight: 600 }}>
+            Top Domains by Security Level
+          </h2>
+        </div>
+
+        {!domainSecurity || domainSecurity.domains.length === 0 ? (
+          <div style={{ textAlign: 'center', padding: '2rem', color: 'var(--text-muted)' }}>
+            No domain data in this time frame.
+          </div>
+        ) : (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
+            {domainSecurity.domains.slice(0, 15).map((d, i) => (
+              <div key={d.domain} style={{
+                display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+                padding: '0.5rem 0.75rem', borderBottom: '1px solid var(--border-subtle)',
+              }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', minWidth: 0 }}>
+                  <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)', width: '24px' }}>#{i + 1}</span>
+                  <span style={{ width: 10, height: 10, borderRadius: '50%', background: d.security_color, flexShrink: 0 }} />
+                  <span style={{ fontFamily: 'var(--font-mono)', fontSize: '0.8125rem', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    {d.domain}
+                  </span>
+                </div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', whiteSpace: 'nowrap' }}>
+                  <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>{d.subject}</span>
+                  <span className="badge" style={{ background: `${d.security_color}22`, color: d.security_color }}>
+                    {d.security_label}
+                  </span>
+                  <span style={{ fontFamily: 'var(--font-mono)', fontSize: '0.8125rem' }}>{d.query_count}</span>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+      </>
+      )}
 
       {/* Data Export & Audit Portability */}
       <div className="glass-card" style={{ padding: '1.5rem' }}>

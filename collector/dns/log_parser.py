@@ -87,14 +87,16 @@ def _parse_timestamp(match: re.Match) -> str:
     now = datetime.now(timezone.utc)
     try:
         if ts_long:
-            dt = datetime.strptime(ts_long, "%d-%b-%Y %H:%M:%S").replace(
-                tzinfo=timezone.utc
+            # dnsmasq logs in the host's local timezone, not UTC.
+            dt = datetime.strptime(ts_long, "%d-%b-%Y %H:%M:%S").astimezone(
+                timezone.utc
             )
         else:
             # Short form has no year — use current year, correct for Dec→Jan wrap.
-            dt = datetime.strptime(f"{now.year} {ts_short}", "%Y %b %d %H:%M:%S").replace(
-                tzinfo=timezone.utc
-            )
+            # Naive strptime is local time; convert to UTC for storage.
+            dt = datetime.strptime(
+                f"{now.year} {ts_short}", "%Y %b %d %H:%M:%S"
+            ).astimezone(timezone.utc)
             # If the parsed date is in the future by more than a day, it's
             # probably last year (log from late December, parsed in January).
             if (dt - now).total_seconds() > 86400:

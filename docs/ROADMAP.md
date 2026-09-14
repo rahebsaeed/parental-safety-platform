@@ -341,6 +341,90 @@ for port 53.
   `systemctl is-active dnsmasq` is `active`; restarting the API
   service does not kill DNS.
 
+## Phase 15 — AI-Assisted Classification ✅ Complete (2026-09-14)
+
+Static rules can't name every new adult site, and an unlisted one slipped
+through silently as UNCATEGORIZED. Free OpenRouter models now close the gap:
+
+- **Verdict → rule mapping** (`openrouter_classifier.py`):
+  `UNSAFE`/`GAMBLING` → `ADULT_CONTENT` (the only alert-firing category),
+  `MESSAGING` → `SOCIAL_MEDIA`, etc.; `UNKNOWN` is never persisted so
+  domains stay retryable. Model fallback chain
+  (nemotron → gemma-4 → liquid) with per-model cooldowns on 429/404, 5s
+  pacing between batch calls, and defensive parsing (colon/en-dash/bold
+  formats, empty-200 payloads).
+- **Persistence** (`classification_repo.ai_sync_uncategorized`): rule pass
+  first (zero AI spend for known domains), then top UNCATEGORIZED domains
+  by query volume, bounded per run; manual overrides (`is_override=1`)
+  are never touched; commits before network I/O so long AI batches can't
+  hold a SQLite write lock against the collector.
+- **Closed-loop alerts**: `POST /alerts/scan` refreshes classifications
+  *before* evaluating — a new adult domain is labeled then flagged in one
+  scan. Verified: mocked UNSAFE verdict → stored `ADULT_CONTENT` →
+  CRITICAL alert; live: `chatgpt.com` → `PRODUCTIVITY` persisted.
+- **Visible UI** (Classifications page): sandbox Rules/AI toggle (AI panel
+  shows static verdict alongside, Save-as-rule persists), per-row Ask AI
+  buttons on UNCATEGORIZED rows, Sync reports AI counts; Settings holds
+  the key (Test-validated), serving-model indicator, and last-verified
+  timestamp. Key lives in the `settings` DB table, never `.env`/git.
+- **30 major adult tube/studio/cam sites** added as static suffix rules
+  (`beeg.com`, `chaturbate.com`, …) — deterministic, instant, immune to
+  AI throttling; plus a `ts.net` infrastructure rule so Tailscale-rewritten
+  domains can't false-positive as phishing.
+- **Hourly `parental-monitor-ai-sync.timer`**: new domains are AI-resolved
+  without anyone pressing Sync.
+
+## Phase 16 — Safe-DNS Failover Control ✅ Complete (2026-09-14)
+
+Protection only holds while the router advertises `192.168.1.20`, and the
+old automation silently lost on suspend/shutdown (plus a 500 on the
+Analytics security endpoint from a half-applied `/opt` edit).
+
+- **Header control**: every dashboard page shows the router's *actual*
+  reported DNS (green `rosa-PC` / amber `Router`) with a one-click switch;
+  polled every 30s so automation can never leave the UI lying.
+  New `GET/POST /api/router-dns/*` endpoints (5 tests) delegate switching
+  to the canonical `router-dns.sh` — one source of truth.
+- **Suspend**: new `/etc/systemd/system-sleep/router-dns` hook — failover
+  *before* sleep (network still up, unlike shutdown ordering), restore on
+  resume. Tested both directions live.
+- **Shutdown/reboot**: replaced the racy `router-dns-on/off` pair with
+  `router-dns-guard.service` — a persistent guard whose ExecStop runs
+  *before* NetworkManager stops, so the fallback still has a network.
+- **Logout**: verified no hook needed — the WiFi connection is
+  system-wide (`connection.permissions` empty) and survives logout; any
+  real disconnect is already caught by the NM dispatcher.
+- **Analytics 500**: stored rules (static/AI/override) now take precedence
+  over keyword heuristics in `/api/domains/security|dangerous|subjects`,
+  with `ADULT_CONTENT` → Dangerous — the half-applied openrouter block
+  that referenced an unimported name is gone.
+
+## Phase 17 — Discovery Hardening ✅ Complete (2026-09-14)
+
+New devices (e.g. `.15`/Ahmed-PC, S24-Ultra after a DHCP move) appeared
+in DNS history as permanent Unassigned: scans missed them, attribution
+only ran at ingest, and a same-subnet fallback sprayed their queries
+onto unrelated devices (`.5` → dev_07 while dev_07 sat at `.6`).
+
+- **Router DHCP leases as a scan source** (`router_clients.py`): login →
+  `home_getclientList.asp` → parse/decode, merged with ARP results every
+  cycle (deduped, best-effort, secrets never logged). Immediately found
+  HONOR-X8a as dev_08.
+- **DNS-driven placeholders** (`ingester.py`): first query from an
+  unknown private IP creates a LOW-confidence device and attributes from
+  sighting #1 — Unassigned-while-querying is now impossible.
+- **IP-adoption** (`identity.py`): a scan observing (same IP + MAC)
+  enriches the placeholder instead of duplicating it; claimed MACs still
+  match their true owners first.
+- **Asking = alive**: devices with DNS queries in the last 30 min are
+  exempt from offline-marking, so quiet/static-IP hosts stop flapping.
+- **Exact-match attribution only**: the subnet fallback is deleted
+  (a wrong device is worse than an honest unknown); affected S24 history
+  backfilled after a timestamped backup.
+- **Hourly `parental-monitor-scan.timer`** keeps mappings fresh across
+  DHCP moves; **timestamps fixed** (dnsmasq local time was stamped as
+  UTC, +1h skew on every row).
+
 ## Incident Log
 
 A running record of real production incidents, for the same reason
@@ -356,3 +440,7 @@ hypothetical ones.
 | 2026-09-13 | `cp -r dist /opt/.../dist` created nested `dist/dist`, UI served stale JS | `cp -r src dest` copies src *inside* dest when dest exists | Copy `dist/index.html` + `dist/assets/*` explicitly, remove stale hashed bundles | Deploy checklist: verify `/assets/index-*.js` hash matches fresh build |
 | 2026-09-13 | All devices stuck `online`; Refresh never found new devices/IPs | API service gated active ARP on `geteuid()==0` so scans were always passive-only and `mark_offline_except` never ran; no Scan trigger existed | Added `POST /devices/scan` + Scan button; detect `CAP_NET_RAW` via raw-socket probe; 30-min stale-offline aging in passive scans + effective-status in API | Verified active scan succeeds from API service, dev_06 correctly offline |
 | 2026-09-13 | DNS broke after pointing router at 192.168.1.20 | dnsmasq ran as a manual `nobody` process (no systemd service); `systemd-resolved` stub listener competed on 127.0.0.53; old manual process held port 53 in a user namespace preventing service start | Created `dnsmasq.service` with `Type=simple` + `--no-daemon`; disabled `systemd-resolved` stub listener; `setup.sh` now installs the systemd unit | `systemctl is-active dnsmasq` always active, `dig @192.168.1.20` resolves |
+| 2026-09-14 | S24-Ultra's requests split across dev_07/NULL; new devices stuck Unassigned | Same-subnet fallback in `resolve_device_id_for_ip` attributed unknown IPs to the most-recently-seen device; scans (the only mapping source) missed DHCP-moved/static-IP hosts | Deleted the fallback (exact-match only); ingester creates IP-only placeholders on first sighting; scans enrich via IP-adoption; hourly scan timer; backfilled `.5` → dev_05 after backup | Unknown private IP can no longer stay Unassigned past its first query |
+| 2026-09-14 | Every `occurred_at` 1h in the future | `log_parser` stamped dnsmasq's local-time log lines as UTC | Interpret naive stamps as local, convert to UTC (round-trip test included) | New rows match real UTC; old rows left as-is (documented skew window) |
+| 2026-09-14 | `/api/domains/security` 500 on any UNKNOWN domain | Half-applied `/opt`-only edit constructed `DomainSecurity(...)` without importing it; repo copy didn't match prod | Removed the block; stored rules now take precedence over keywords in all three endpoints; repo↔`/opt` diff-checked | Deploy checklist: diff repo vs `/opt` for every touched backend file before restart |
+| 2026-09-14 | `L.map`/`w.map`/`q.map is not a function` console errors | Misdiagnosed as minifier bug twice (renames, terser) — actually `GET /api/activity` returns `{items:[...]}` and callers mapped the envelope object | Unwrap `.items` in `api.getActivity` + `Array.isArray` guards | API doc now states paginated shape explicitly; verify with Network tab, not bundle archaeology |

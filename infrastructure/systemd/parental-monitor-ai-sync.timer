@@ -1,0 +1,12 @@
+[Unit]
+Description=Run Parental Safety AI domain classification sync hourly
+Documentation=https://github.com/local/parental-safety-platform
+
+[Timer]
+OnCalendar=hourly
+Persistent=true
+RandomizedDelaySec=10m
+Unit=parental-monitor-ai-sync.service
+
+[Install]
+WantedBy=timers.target

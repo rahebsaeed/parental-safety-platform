@@ -1,0 +1,32 @@
+#!/bin/bash
+# =============================================================================
+# router-dns-sleep — systemd-sleep hook for suspend/hibernate
+# Installed to /etc/systemd/system-sleep/router-dns (must be executable).
+#
+#   pre  suspend|hibernate|... → router DNS to 192.168.1.1 (this PC is going
+#                                away; the LAN must not lose name resolution)
+#   post suspend|hibernate|... → router DNS back to 192.168.1.20 (filtered)
+#
+# Sleep hooks run synchronously before devices suspend, so the network is
+# still up on "pre" — unlike shutdown ordering, this path is reliable.
+# Runs in the background on "post" so a slow router never delays resume.
+# =============================================================================
+
+ROUTER_DNS_SCRIPT="/opt/parental-safety/scripts/router-dns.sh"
+
+log() {
+    echo "[$(date '+%F %T')] router-dns-sleep($1/$2): $3" | systemd-cat -t router-dns-sleep -p info 2>/dev/null || true
+}
+
+case "$1/$2" in
+    pre/*)
+        log "$1" "$2" "PC suspending → setting router DNS to 192.168.1.1"
+        "$ROUTER_DNS_SCRIPT" off >/dev/null 2>&1
+        ;;
+    post/*)
+        log "$1" "$2" "PC resumed → restoring router DNS to 192.168.1.20"
+        "$ROUTER_DNS_SCRIPT" on >/dev/null 2>&1 &
+        ;;
+esac
+
+exit 0

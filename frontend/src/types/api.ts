@@ -7,6 +7,15 @@ export interface HealthStatus {
   query_count: number;
 }
 
+export interface SessionInfo {
+  user_id: string | null;
+  username: string | null;
+  token: string | null;
+  expires_at: string | null;
+  authenticated: boolean;
+  auth_enabled: boolean;
+}
+
 export interface Device {
   device_id: string;
   friendly_name: string | null;
@@ -130,16 +139,59 @@ export interface DomainClassification {
   classified_at: string | null;
 }
 
-export interface SessionInfo {
-  authenticated: boolean;
-  auth_enabled: boolean;
-  expires_at: string | null;
+export interface DomainSecurity {
+  domain: string;
+  query_count: number;
+  unique_devices: number;
+  security_level: string;
+  security_label: string;
+  security_color: string;
+  security_icon: string;
+  category: string;
+  subject: string;
+  risk_score: number;
+  reason: string;
 }
 
-export interface DevicePrivacy {
-  device_id: string;
-  visible_in_analytics: boolean;
-  reason: string | null;
+export interface DomainSecurityResponse {
+  device_id: string | null;
+  total_domains: number;
+  domains: DomainSecurity[];
+  summary: { safe: number; risky: number; dangerous: number; unknown: number };
+}
+
+export interface DangerousDomain {
+  domain: string;
+  query_count: number;
+  security_level: string;
+  security_label: string;
+  security_color: string;
+  category: string;
+  subject: string;
+  reason: string;
+}
+
+export interface SubjectResponse {
+  device_id: string | null;
+  total_queries: number;
+  subjects: { subject: string; query_count: number }[];
+}
+
+export interface OpenRouterCategory {
+  category: string;
+  confidence: number;
+  reason: string;
+  cached: boolean;
+}
+
+export type RouterDnsMode = 'dnsmasq' | 'router' | 'custom' | 'unknown' | 'unreachable';
+
+export interface RouterDnsStatus {
+  mode: RouterDnsMode;
+  pridns: string | null;
+  secdns: string | null;
+  dnsmasq_ip: string;
+  router_ip: string;
 }
 
 export type RealtimeEventType = 'dns_activity' | 'safety_alert' | 'device_status' | 'connected' | 'pong';

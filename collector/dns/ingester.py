@@ -40,6 +40,27 @@ logger = logging.getLogger(__name__)
 _DEFAULT_POLL_INTERVAL = 5  # seconds
 
 
+def _is_device_candidate_ip(source_ip: str) -> bool:
+    """Whether an unmapped source IP should get a placeholder device.
+
+    Only private/link-local addresses qualify: those are LAN clients the
+    scans haven't mapped yet. Loopback is the collector host talking to
+    itself, and anything public/global in this log is noise — both stay
+    PARTIAL/Unassigned. Malformed input stays PARTIAL too.
+    """
+    import ipaddress  # noqa: PLC0415 (local import keeps module import light)
+
+    try:
+        ip = ipaddress.ip_address((source_ip or "").strip())
+    except ValueError:
+        return False
+    return (
+        not ip.is_loopback
+        and not ip.is_multicast
+        and (ip.is_private or ip.is_link_local)
+    )
+
+
 class Ingester:
     """Tails a dnsmasq log file and writes DNS query records to SQLite."""
 
@@ -133,6 +154,35 @@ class Ingester:
     def _persist(self, conn: sqlite3.Connection, entry) -> int:  # noqa: ANN001
         """Write one DnsLogEntry to the database. Returns 1 on success."""
         device_id = storage.resolve_device_id_for_ip(conn, entry.source_ip)
+        if device_id is None and _is_device_candidate_ip(entry.source_ip):
+            # First sighting of this IP: the device exists (it just asked
+            # us a question) even though no scan has mapped it yet. Create
+            # an IP-only placeholder so the query is attributed from the
+            # start instead of sitting Unassigned; the next discovery scan
+            # enriches it with MAC/hostname via identity IP-adoption.
+            device_id = storage.create_device(
+                conn,
+                primary_mac=None,
+                mac_is_randomized=False,
+                confidence="LOW",
+                now_iso=entry.occurred_at,
+            )
+            storage.record_observation(
+                conn,
+                device_id=device_id,
+                ip_address=entry.source_ip,
+                mac_address=None,
+                hostname=None,
+                vendor=None,
+                observed_at_iso=entry.occurred_at,
+                confidence="LOW",
+            )
+            logger.info(
+                "device_placeholder_created device_id=%s ip=%s "
+                "(unknown IP seen in DNS; scan will enrich)",
+                device_id,
+                entry.source_ip,
+            )
         dns_visibility = "FULL" if device_id is not None else "PARTIAL"
 
         if dns_visibility == "PARTIAL":

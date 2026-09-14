@@ -74,7 +74,7 @@ export const AlertsPage: React.FC = () => {
   async function triggerScan() {
     try {
       setScanning(true);
-      const res = await api.triggerAlertScan(1000);
+      const res = await api.triggerScan(1000);
       alert(`Safety Scan Complete:\n• Queries scanned: ${res.scanned_queries}\n• New alerts: ${res.alerts_created}\n• Aggregated: ${res.alerts_aggregated}`);
       await loadAlerts();
     } catch (err) {

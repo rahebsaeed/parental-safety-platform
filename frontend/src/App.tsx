@@ -70,13 +70,13 @@ export const App: React.FC = () => {
   }, [session?.authenticated, fetchGlobalStatus]);
 
   const handleLoginSuccess = useCallback(() => {
-    setSession({ authenticated: true, auth_enabled: true, expires_at: '' });
+    setSession({ user_id: null, username: null, token: null, expires_at: "", authenticated: true, auth_enabled: true });
     fetchGlobalStatus();
   }, [fetchGlobalStatus]);
 
   const handleLogout = useCallback(async () => {
     try { await api.logout(); } catch { /* ignore */ }
-    setSession({ authenticated: false, auth_enabled: true, expires_at: null });
+    setSession({ user_id: null, username: null, token: null, expires_at: "", authenticated: true, auth_enabled: true });
   }, []);
 
   const handleManualRefresh = useCallback(async () => {
