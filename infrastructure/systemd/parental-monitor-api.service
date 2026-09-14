@@ -1,0 +1,47 @@
+[Unit]
+Description=Parental Safety Platform — FastAPI Backend (uvicorn)
+Documentation=https://github.com/local/parental-safety-platform
+# Start after collector so the SQLite file definitely exists
+After=network.target parental-monitor-collector.service
+Wants=parental-monitor-collector.service
+
+[Service]
+Type=simple
+User=parental-monitor
+Group=parental-monitor
+
+WorkingDirectory=/opt/parental-safety
+
+# Bind to loopback only — nginx handles the LAN-facing port
+ExecStart=/opt/parental-safety/collector/.venv/bin/uvicorn \
+    backend.app.main:app \
+    --host 127.0.0.1 \
+    --port 8000 \
+    --workers 1 \
+    --log-level info \
+    --no-access-log
+
+Restart=always
+RestartSec=5s
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=parental-monitor-api
+
+# Security hardening — raw socket access for device discovery
+NoNewPrivileges=yes
+CapabilityBoundingSet=CAP_NET_RAW CAP_NET_ADMIN
+AmbientCapabilities=CAP_NET_RAW CAP_NET_ADMIN
+ProtectSystem=strict
+ProtectHome=yes
+ReadWritePaths=/opt/parental-safety/collector/data /opt/parental-safety/.env
+PrivateTmp=yes
+PrivateDevices=yes
+
+# Explicit DB path fallback — EnvironmentFile below can override.
+Environment=DATABASE_PATH=/opt/parental-safety/collector/data/discovery.sqlite3
+Environment=DISCOVERY_DB_PATH=/opt/parental-safety/collector/data/discovery.sqlite3
+EnvironmentFile=-/opt/parental-safety/.env
+
+[Install]
+WantedBy=multi-user.target

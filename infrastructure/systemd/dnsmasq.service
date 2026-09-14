@@ -1,0 +1,32 @@
+[Unit]
+Description=Parental Safety Platform - DNS Forwarder & Logger
+Documentation=https://github.com/local/parental-safety-platform
+After=network-online.target
+Wants=network-online.target
+Before=parental-monitor-collector.service
+
+[Service]
+Type=simple
+User=nobody
+Group=nogroup
+WorkingDirectory=/opt/parental-safety
+ExecStart=/usr/sbin/dnsmasq --no-daemon --conf-file=/etc/dnsmasq.d/parental-safety-phase2.conf
+ExecReload=/bin/kill -HUP $MAINPID
+Restart=always
+RestartSec=5s
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=parental-safety-dnsmasq
+AmbientCapabilities=CAP_NET_BIND_SERVICE
+CapabilityBoundingSet=CAP_NET_BIND_SERVICE
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+ReadWritePaths=/var/log/parental-safety
+PrivateTmp=yes
+PrivateDevices=no
+PrivateNetwork=no
+EnvironmentFile=-/opt/parental-safety/.env
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,26 @@
+[build-system]
+requires = ["setuptools>=68.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "parental-safety-collector"
+version = "0.2.0"
+description = "Phase 1 + 2: LAN device discovery and DNS observation collector for the parental safety platform"
+requires-python = ">=3.10"
+readme = "README.md"
+dependencies = [
+    "scapy>=2.5.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0.0",
+]
+
+[project.scripts]
+parental-monitor-discover = "collector.device_discovery.cli:main"
+parental-monitor-dns      = "collector.dns.cli:main"
+
+[tool.setuptools]
+packages = ["collector", "collector.device_discovery", "collector.dns"]
+package-dir = { "collector" = "." }

@@ -1,0 +1,66 @@
+[Unit]
+Description=Parental Safety Platform — DNS Collector & Device Discovery
+Documentation=https://github.com/local/parental-safety-platform
+# Must start after networking is fully up and dnsmasq is logging
+After=network-online.target dnsmasq.service
+Wants=network-online.target
+# Restart the API if the collector dies (shared SQLite)
+Before=parental-monitor-api.service
+
+[Service]
+Type=simple
+User=parental-monitor
+Group=parental-monitor
+
+# Installation root
+WorkingDirectory=/opt/parental-safety
+
+# Venv Python runs the collector daemon (module: collector.dns.cli)
+ExecStart=/opt/parental-safety/collector/.venv/bin/python \
+    -m collector.dns.cli start
+
+ExecReload=/bin/kill -HUP $MAINPID
+
+# Restart policy: always restart, 5-second delay between attempts
+Restart=always
+RestartSec=5s
+
+# Log to systemd journal
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=parental-monitor-collector
+
+# -------------------------------------------------------
+# Capability hardening — replaces sudo for ARP raw sockets
+# -------------------------------------------------------
+# Grant CAP_NET_RAW (raw socket / ARP scan) and CAP_NET_ADMIN
+# (interface config, if needed) as ambient capabilities so the
+# unprivileged parental-monitor user can run scapy without sudo.
+AmbientCapabilities=CAP_NET_RAW CAP_NET_ADMIN
+CapabilityBoundingSet=CAP_NET_RAW CAP_NET_ADMIN
+
+# Security hardening
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+# Allow writing to the data directory and log directory only
+ReadWritePaths=/opt/parental-safety/collector/data /var/log/parental-safety
+PrivateTmp=yes
+PrivateDevices=yes
+# Network access is required
+PrivateNetwork=no
+
+# Environment
+# Explicit absolute paths — do NOT rely on relative ./data defaults here:
+# with WorkingDirectory=/opt/parental-safety, a relative ./data/... would
+# resolve to /opt/parental-safety/data/... instead of the real
+# /opt/parental-safety/collector/data/... (collector defaults assume
+# cwd=collector/ in dev). EnvironmentFile below can override these.
+Environment=DISCOVERY_DB_PATH=/opt/parental-safety/collector/data/discovery.sqlite3
+Environment=DNS_LOG_PATH=/var/log/parental-safety/dnsmasq.log
+Environment=DNSMASQ_LOG_PATH=/var/log/parental-safety/dnsmasq.log
+Environment=DATABASE_PATH=/opt/parental-safety/collector/data/discovery.sqlite3
+EnvironmentFile=-/opt/parental-safety/.env
+
+[Install]
+WantedBy=multi-user.target

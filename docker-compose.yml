@@ -1,0 +1,59 @@
+# Parental Safety Platform — Docker Compose
+#
+# Covers: FastAPI backend + React frontend (via nginx).
+#
+# NOTE: The collector (DNS capture / ARP scanner) requires raw socket
+# access and runs natively via systemd, NOT in Docker. See:
+#   infrastructure/systemd/parental-monitor-collector.service
+#
+# Usage:
+#   docker compose up -d               # start backend + frontend
+#   docker compose logs -f backend     # stream backend logs
+#   docker compose down                # stop everything
+#
+# The SQLite database is stored in a named volume (parental-data) so it
+# persists across container restarts. To use an existing database from a
+# native install, bind-mount instead:
+#   volumes:
+#     - /opt/parental-safety/collector/data:/data
+
+services:
+
+  backend:
+    build:
+      context: .
+      dockerfile: infrastructure/docker/Dockerfile.backend
+    container_name: parental-monitor-api
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      DATABASE_PATH: /data/discovery.sqlite3
+    volumes:
+      - parental-data:/data
+    # Only accessible to the frontend container — not exposed to the host
+    expose:
+      - "8000"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/api/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+
+  frontend:
+    build:
+      context: .
+      dockerfile: infrastructure/docker/Dockerfile.frontend
+    container_name: parental-monitor-frontend
+    restart: unless-stopped
+    ports:
+      # Bind to LAN IP only — not 0.0.0.0
+      - "192.168.1.20:80:80"
+    depends_on:
+      backend:
+        condition: service_healthy
+
+volumes:
+  parental-data:
+    driver: local

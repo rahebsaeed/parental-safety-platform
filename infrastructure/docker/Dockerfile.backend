@@ -1,0 +1,47 @@
+# syntax=docker/dockerfile:1
+# =============================================================================
+# Dockerfile.backend — FastAPI / uvicorn backend
+# =============================================================================
+# Build context: project root  (docker build -f infrastructure/docker/Dockerfile.backend .)
+# =============================================================================
+
+FROM python:3.12-slim AS base
+
+# System deps
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        sqlite3 \
+        curl \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+# Install Python dependencies first (better layer caching)
+COPY backend/pyproject.toml ./backend/pyproject.toml
+COPY collector/pyproject.toml ./collector/pyproject.toml
+COPY collector/README.md ./collector/README.md
+
+# Install both packages in editable mode
+RUN pip install --no-cache-dir -e ./collector -e ./backend
+
+# Copy source
+COPY backend/ ./backend/
+COPY collector/ ./collector/
+
+# Alembic config lives at repo root level in backend/alembic.ini
+COPY backend/alembic.ini ./backend/alembic.ini
+
+# Data directory — mount a named volume here in docker-compose.yml
+RUN mkdir -p /data
+ENV DATABASE_PATH=/data/discovery.sqlite3
+
+# Expose port
+EXPOSE 8000
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
+    CMD curl -f http://localhost:8000/api/health || exit 1
+
+# Entrypoint: run migrations then launch uvicorn
+COPY infrastructure/docker/entrypoint-backend.sh /entrypoint.sh
+RUN chmod +x /entrypoint.sh
+ENTRYPOINT ["/entrypoint.sh"]

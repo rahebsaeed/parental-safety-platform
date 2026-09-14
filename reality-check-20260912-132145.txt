@@ -1,0 +1,188 @@
+==================================================
+== Interfaces and addresses
+== Command: ip addr show
+==================================================
+1: lo: <LOOPBACK,UP,LOWER_UP> mtu 65536 qdisc noqueue state UNKNOWN group default qlen 1000
+    link/loopback 00:00:00:00:00:00 brd 00:00:00:00:00:00
+    inet 127.0.0.1/8 scope host lo
+       valid_lft forever preferred_lft forever
+    inet6 ::1/128 scope host noprefixroute 
+       valid_lft forever preferred_lft forever
+2: enp0s31f6: <NO-CARRIER,BROADCAST,MULTICAST,UP> mtu 1500 qdisc fq_codel state DOWN group default qlen 1000
+    link/ether e8:6a:64:f9:77:b5 brd ff:ff:ff:ff:ff:ff
+3: wlp0s20f3: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500 qdisc noqueue state UP group default qlen 1000
+    link/ether 04:ea:56:ff:79:68 brd ff:ff:ff:ff:ff:ff
+    inet 192.168.1.20/24 brd 192.168.1.255 scope global dynamic noprefixroute wlp0s20f3
+       valid_lft 83791sec preferred_lft 83791sec
+    inet6 fe80::6f1:6ad0:905d:bdc4/64 scope link noprefixroute 
+       valid_lft forever preferred_lft forever
+4: br-73500ef73c1f: <NO-CARRIER,BROADCAST,MULTICAST,UP> mtu 1500 qdisc noqueue state DOWN group default 
+    link/ether b6:1f:59:5f:3d:d0 brd ff:ff:ff:ff:ff:ff
+    inet 172.18.0.1/16 brd 172.18.255.255 scope global br-73500ef73c1f
+       valid_lft forever preferred_lft forever
+5: docker0: <NO-CARRIER,BROADCAST,MULTICAST,UP> mtu 1500 qdisc noqueue state DOWN group default 
+    link/ether 6a:22:1e:f8:5c:ef brd ff:ff:ff:ff:ff:ff
+    inet 172.17.0.1/16 brd 172.17.255.255 scope global docker0
+       valid_lft forever preferred_lft forever
+    inet6 fe80::6822:1eff:fef8:5cef/64 scope link 
+       valid_lft forever preferred_lft forever
+6: lxdbr0: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500 qdisc noqueue state UP group default qlen 1000
+    link/ether 00:16:3e:ae:27:d5 brd ff:ff:ff:ff:ff:ff
+    inet 10.160.184.1/24 scope global lxdbr0
+       valid_lft forever preferred_lft forever
+    inet6 fd42:363b:e30f:6971::1/64 scope global 
+       valid_lft forever preferred_lft forever
+    inet6 fe80::216:3eff:feae:27d5/64 scope link 
+       valid_lft forever preferred_lft forever
+8: veth9d547dc9@if7: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500 qdisc noqueue master lxdbr0 state UP group default qlen 1000
+    link/ether fe:cf:44:9f:e2:46 brd ff:ff:ff:ff:ff:ff link-netnsid 0
+
+==================================================
+== Routing table
+== Command: ip route show
+==================================================
+default via 192.168.1.1 dev wlp0s20f3 proto dhcp src 192.168.1.20 metric 600 
+10.160.184.0/24 dev lxdbr0 proto kernel scope link src 10.160.184.1 
+172.17.0.0/16 dev docker0 proto kernel scope link src 172.17.0.1 linkdown 
+172.18.0.0/16 dev br-73500ef73c1f proto kernel scope link src 172.18.0.1 linkdown 
+192.168.1.0/24 dev wlp0s20f3 proto kernel scope link src 192.168.1.20 metric 600 
+
+==================================================
+== IPv4 neighbor cache
+== Command: ip neigh show
+==================================================
+192.168.1.2 dev wlp0s20f3 lladdr 70:af:09:d4:41:dc DELAY 
+192.168.1.11 dev wlp0s20f3 lladdr c2:10:93:db:84:ff STALE 
+192.168.1.4 dev wlp0s20f3 lladdr 42:12:88:b8:32:56 STALE 
+192.168.1.1 dev wlp0s20f3 lladdr 88:76:b9:c4:17:b2 REACHABLE 
+192.168.1.13 dev wlp0s20f3 lladdr 4e:61:ba:9c:81:6a REACHABLE 
+10.160.184.176 dev lxdbr0 lladdr 00:16:3e:2f:94:85 STALE 
+192.168.1.8 dev wlp0s20f3 FAILED 
+192.168.1.12 dev wlp0s20f3 lladdr 44:5c:e9:a3:9c:2e STALE 
+fe80::1 dev wlp0s20f3 lladdr 88:76:b9:c4:17:b2 router REACHABLE 
+fd42:363b:e30f:6971:216:3eff:fe2f:9485 dev lxdbr0 lladdr 00:16:3e:2f:94:85 STALE 
+fe80::4c61:baff:fe9c:816a dev wlp0s20f3 lladdr 4e:61:ba:9c:81:6a STALE 
+fe80::216:3eff:feae:27d5 dev lxdbr0 lladdr 00:16:3e:ae:27:d5 router STALE 
+fe80::216:3eff:fe2f:9485 dev lxdbr0 lladdr 00:16:3e:2f:94:85 STALE 
+
+==================================================
+== IPv6 neighbor cache
+== Command: ip -6 neigh show
+==================================================
+fe80::1 dev wlp0s20f3 lladdr 88:76:b9:c4:17:b2 router REACHABLE 
+fd42:363b:e30f:6971:216:3eff:fe2f:9485 dev lxdbr0 lladdr 00:16:3e:2f:94:85 STALE 
+fe80::4c61:baff:fe9c:816a dev wlp0s20f3 lladdr 4e:61:ba:9c:81:6a STALE 
+fe80::216:3eff:feae:27d5 dev lxdbr0 lladdr 00:16:3e:ae:27:d5 router STALE 
+fe80::216:3eff:fe2f:9485 dev lxdbr0 lladdr 00:16:3e:2f:94:85 STALE 
+
+==================================================
+== systemd-resolved status
+== Command: resolvectl status
+==================================================
+Global
+         Protocols: -LLMNR -mDNS -DNSOverTLS DNSSEC=no/unsupported
+  resolv.conf mode: stub
+
+Link 2 (enp0s31f6)
+    Current Scopes: none
+         Protocols: -DefaultRoute -LLMNR -mDNS -DNSOverTLS DNSSEC=no/unsupported
+
+Link 3 (wlp0s20f3)
+    Current Scopes: DNS
+         Protocols: +DefaultRoute -LLMNR -mDNS -DNSOverTLS DNSSEC=no/unsupported
+Current DNS Server: fe80::1
+       DNS Servers: 192.168.1.20 fe80::1
+
+Link 4 (br-73500ef73c1f)
+    Current Scopes: none
+         Protocols: -DefaultRoute -LLMNR -mDNS -DNSOverTLS DNSSEC=no/unsupported
+
+Link 5 (docker0)
+    Current Scopes: none
+         Protocols: -DefaultRoute -LLMNR -mDNS -DNSOverTLS DNSSEC=no/unsupported
+
+Link 6 (lxdbr0)
+    Current Scopes: none
+         Protocols: -DefaultRoute -LLMNR -mDNS -DNSOverTLS DNSSEC=no/unsupported
+
+Link 8 (veth9d547dc9)
+    Current Scopes: none
+         Protocols: -DefaultRoute -LLMNR -mDNS -DNSOverTLS DNSSEC=no/unsupported
+
+==================================================
+== NetworkManager device status
+== Command: nmcli device status
+==================================================
+DEVICE             TYPE      STATE                   CONNECTION        
+wlp0s20f3          wifi      connected               ADSL_inwi_5G_17B2 
+lxdbr0             bridge    connected (externally)  lxdbr0            
+docker0            bridge    connected (externally)  docker0           
+lo                 loopback  connected (externally)  lo                
+br-73500ef73c1f    bridge    connected (externally)  br-73500ef73c1f   
+78:C5:F8:A3:D1:63  bt        disconnected            --                
+p2p-dev-wlp0s20f3  wifi-p2p  disconnected            --                
+enp0s31f6          ethernet  unavailable             --                
+veth9d547dc9       ethernet  unmanaged               --                
+
+==================================================
+== resolv.conf
+== Command: cat /etc/resolv.conf
+==================================================
+# This is /run/systemd/resolve/stub-resolv.conf managed by man:systemd-resolved(8).
+# Do not edit.
+#
+# This file might be symlinked as /etc/resolv.conf. If you're looking at
+# /etc/resolv.conf and seeing this text, you have followed the symlink.
+#
+# This is a dynamic resolv.conf file for connecting local clients to the
+# internal DNS stub resolver of systemd-resolved. This file lists all
+# configured search domains.
+#
+# Run "resolvectl status" to see details about the uplink DNS servers
+# currently in use.
+#
+# Third party programs should typically not access this file directly, but only
+# through the symlink at /etc/resolv.conf. To manage man:resolv.conf(5) in a
+# different way, replace this symlink by a static file or a different symlink.
+#
+# See man:systemd-resolved.service(8) for details about the supported modes of
+# operation for /etc/resolv.conf.
+
+nameserver 127.0.0.53
+options edns0 trust-ad
+search .
+
+==================================================
+== Active NetworkManager connections
+== Command: nmcli connection show --active
+==================================================
+NAME               UUID                                  TYPE      DEVICE          
+ADSL_inwi_5G_17B2  b82a63aa-21a2-4de2-a3ef-865cd2999263  wifi      wlp0s20f3       
+lxdbr0             b887318d-4311-4e30-9925-a6a4c1c8a053  bridge    lxdbr0          
+docker0            7d508651-a67f-49b6-add5-4dd9193d5837  bridge    docker0         
+lo                 acbc7799-6226-45a8-9de2-40e09e188768  loopback  lo              
+br-73500ef73c1f    a451153f-ec26-4bfc-bf12-6b320a990e08  bridge    br-73500ef73c1f 
+
+==================================================
+== NetworkManager detail for wlp0s20f3
+== Command: nmcli device show wlp0s20f3
+==================================================
+GENERAL.DEVICE:                         wlp0s20f3
+GENERAL.TYPE:                           wifi
+GENERAL.HWADDR:                         04:EA:56:FF:79:68
+GENERAL.MTU:                            1500
+GENERAL.STATE:                          100 (connected)
+GENERAL.CONNECTION:                     ADSL_inwi_5G_17B2
+GENERAL.CON-PATH:                       /org/freedesktop/NetworkManager/ActiveConnection/13
+IP4.ADDRESS[1]:                         192.168.1.20/24
+IP4.GATEWAY:                            192.168.1.1
+IP4.ROUTE[1]:                           dst = 192.168.1.0/24, nh = 0.0.0.0, mt = 600
+IP4.ROUTE[2]:                           dst = 0.0.0.0/0, nh = 192.168.1.1, mt = 600
+IP4.DNS[1]:                             192.168.1.20
+IP4.WINS[1]:                            192.168.1.1
+IP6.ADDRESS[1]:                         fe80::6f1:6ad0:905d:bdc4/64
+IP6.GATEWAY:                            fe80::1
+IP6.ROUTE[1]:                           dst = fe80::/64, nh = ::, mt = 1024
+IP6.ROUTE[2]:                           dst = ::/0, nh = fe80::1, mt = 20600
+IP6.DNS[1]:                             fe80::1
+
