@@ -24,7 +24,9 @@ export const DevicesPage: React.FC<Props> = ({ onScan, scanning }) => {
   const [friendlyNameInput, setFriendlyNameInput] = useState('');
   const [deviceTypeInput, setDeviceTypeInput] = useState('');
   const [loading, setLoading] = useState(true);
-  const [statusFilter, setStatusFilter] = useState<'all' | 'online' | 'offline'>('all');
+  // Default to online-only: matches the router's connected-client count
+  // (the router never lists itself; offline devices live on the Offline tab).
+  const [statusFilter, setStatusFilter] = useState<'all' | 'online' | 'offline'>('online');
 
   useEffect(() => {
     loadDevices();
@@ -169,6 +171,11 @@ export const DevicesPage: React.FC<Props> = ({ onScan, scanning }) => {
                       </div>
                       <div style={{ fontSize: '0.8125rem', color: 'var(--text-muted)' }}>
                         {dev.device_type || 'Unclassified'} • {dev.vendor || 'Unknown Vendor'}
+                        {dev.is_gateway ? (
+                          <span className="badge badge-success" style={{ marginLeft: 6, padding: '0.1rem 0.4rem', fontSize: '0.7rem' }}>
+                            Gateway
+                          </span>
+                        ) : null}
                       </div>
                     </div>
                   </div>

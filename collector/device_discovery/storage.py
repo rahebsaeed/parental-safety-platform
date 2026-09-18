@@ -249,6 +249,21 @@ def get_devices_with_recent_dns(conn: sqlite3.Connection, since_iso: str) -> set
     return {row["device_id"] for row in rows}
 
 
+def get_devices_seen_since(conn: sqlite3.Connection, since_iso: str) -> set[str]:
+    """Device IDs whose last_seen is at or after `since_iso`.
+
+    Used as a flap guard: a device that answered a recent scan but missed
+    this one (WiFi power-save can drop a single broadcast ARP round) is
+    still treated as present. Only devices unseen for longer than the
+    grace window go offline.
+    """
+    rows = conn.execute(
+        "SELECT device_id FROM devices WHERE last_seen >= ?",
+        (since_iso,),
+    ).fetchall()
+    return {row["device_id"] for row in rows}
+
+
 def _next_device_id(conn: sqlite3.Connection) -> str:
     rows = conn.execute("SELECT device_id FROM devices").fetchall()
     highest = 0

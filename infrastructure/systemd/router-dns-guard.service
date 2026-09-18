@@ -1,3 +1,7 @@
+# RETIRED — manual-only model: install.sh no longer installs this unit and
+# removes any deployed copy. Router DNS changes only via the dashboard
+# (POST /api/router-dns/mode); the sole automation is the 3h failsafe
+# (parental-monitor-dns-revert.timer). Kept in-tree for history.
 [Unit]
 Description=Guard router DNS: dnsmasq while PC is up, router fallback on shutdown
 Documentation=https://github.com/local/parental-safety-platform

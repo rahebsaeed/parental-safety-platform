@@ -1,0 +1,12 @@
+[Unit]
+Description=Check 3h Safe-DNS failsafe deadline every 5 minutes
+Documentation=https://github.com/local/parental-safety-platform
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=5min
+Persistent=true
+Unit=parental-monitor-dns-revert.service
+
+[Install]
+WantedBy=timers.target

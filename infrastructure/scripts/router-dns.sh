@@ -17,6 +17,11 @@ DNS_ON="192.168.1.20"
 DNS_OFF="192.168.1.1"
 USER="${ROUTER_USER:-user}"
 PWD_HASH="${ROUTER_PWD_HASH:-ee11cbb19052e40b07aac0ca060c23ee}"
+# Short DHCP lease (seconds) enforced on every switch. With 600s, clients
+# renew (T1) every ~5 min, so any router-DNS switch propagates LAN-wide
+# within minutes — no router reboot needed per switch. (The factory 86400s
+# lease meant up to 24h of split visibility after each change.)
+DHCP_LEASE="${ROUTER_DHCP_LEASE:-600}"
 
 login() {
   curl -s -c /tmp/dlink_cookies.txt \
@@ -56,7 +61,7 @@ set_router_dns() {
     -H "content-type: application/x-www-form-urlencoded; charset=UTF-8" \
     -H "x-requested-with: XMLHttpRequest" \
     -H "referer: ${ROUTER}/cgi-bin/New_GUI/Network.asp" \
-    --data-binary "lan_ip1=192.168.1.1&lan_netmask1=255.255.255.0&lan_dhcp_type=1&lan_dhcp_start=192.168.1.2&lan_dhcp_count=253&lan_dhcp_lease=86400&lan_dhcp_option60_vendorID=MSFT+5.0&lan_dhcp_relay_server=&upnp_active=Yes&mirror_active=No&AutoConfig_Flag=1&RAEnable_Flag=1&RAMode=0&radvdPrefix=3ffe%3A501%3Affff%3A100%3A%3A&RAPrefixLen=64&PreferredLifetime=3600&ValidLifetime=7200&RAManagedEn_Flag=0&RAOtherEn_Flag=1&rapdsource=0&EnDHCPServerFlag=1&DHCPSetTypeFlag=0&AddrFormat=AddrPool&dhcpPrefix=&PrefixLen=&t1=3600&t2=7200&DnsSrvOne=fe80%3A%3A1&DnsSrvTwo=fe80%3A%3A2&DnsSrvOne_Source=fe80%3A%3A1&DnsSrvTwo_Source=fe80%3A%3A2&dnssource=999&pridns=${dns_ip}&secdns=${dns_ip}&sessionKey=${session_key}" \
+    --data-binary "lan_ip1=192.168.1.1&lan_netmask1=255.255.255.0&lan_dhcp_type=1&lan_dhcp_start=192.168.1.2&lan_dhcp_count=253&lan_dhcp_lease=${DHCP_LEASE}&lan_dhcp_option60_vendorID=MSFT+5.0&lan_dhcp_relay_server=&upnp_active=Yes&mirror_active=No&AutoConfig_Flag=1&RAEnable_Flag=1&RAMode=0&radvdPrefix=3ffe%3A501%3Affff%3A100%3A%3A&RAPrefixLen=64&PreferredLifetime=3600&ValidLifetime=7200&RAManagedEn_Flag=0&RAOtherEn_Flag=1&rapdsource=0&EnDHCPServerFlag=1&DHCPSetTypeFlag=0&AddrFormat=AddrPool&dhcpPrefix=&PrefixLen=&t1=3600&t2=7200&DnsSrvOne=fe80%3A%3A1&DnsSrvTwo=fe80%3A%3A2&DnsSrvOne_Source=fe80%3A%3A1&DnsSrvTwo_Source=fe80%3A%3A2&dnssource=999&pridns=${dns_ip}&secdns=${dns_ip}&sessionKey=${session_key}" \
     2>/dev/null || echo "FAILED"
 
   echo "Router DNS set to $dns_ip"

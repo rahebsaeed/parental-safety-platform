@@ -13,14 +13,24 @@ units, `daemon-reload`s, and enables everything).
 | `dnsmasq` | service | always-on | LAN resolver on port 53, `log-queries` on |
 | `parental-monitor-scan.service` | oneshot | `parental-monitor-scan.timer` hourly (+5m jitter, persistent) | ARP + router-DHCP discovery; keeps IP→device mapping fresh |
 | `parental-monitor-ai-sync.service` | oneshot | `parental-monitor-ai-sync.timer` hourly (+10m jitter, persistent) | Rule sync, then top-20 unknowns to OpenRouter; 15-min timeout for slow free pools |
-| `router-dns-guard.service` | oneshot + RemainAfterExit | boot (ExecStart) / shutdown (ExecStop) | Router DNS → dnsmasq while PC is up, → router on the way down. ExecStop runs *before* NetworkManager stops, so the fallback still has network (the old `Before=shutdown.target` starter raced WiFi teardown and lost) |
+| `parental-monitor-dns-revert.service` | oneshot | `parental-monitor-dns-revert.timer` every 5 min (`Persistent=true`) | 3h Safe-DNS failsafe: reverts router DNS to `192.168.1.1` once the dashboard-started deadline passes. The ONLY automation allowed to touch router DNS |
 | `nginx` | service | always-on | Serves `frontend/dist`, proxies `/api` + `/api/ws` |
 
-Plus, outside systemd: `/etc/systemd/system-sleep/router-dns`
-(failover before suspend, restore after resume) and
-`/etc/NetworkManager/dispatcher.d/99-router-dns-switch` (WiFi up/down).
-Logout needs no hook — the WiFi connection is system-wide
-(`connection.permissions` empty) and survives it.
+Router DNS is **manual-only**: the retired `router-dns-guard.service`,
+`/etc/systemd/system-sleep/router-dns`, and
+`/etc/NetworkManager/dispatcher.d/99-router-dns-switch` are never
+installed anymore — `install.sh` disables and deletes any deployed copies
+(they once caused a WiFi-connected-but-no-internet outage). The dashboard
+header switch (`POST /api/router-dns/mode`) is the sole writer besides the
+failsafe timer above.
+
+## Emergency reset
+
+`infrastructure/scripts/reset-to-normal.sh` returns the PC and router to
+normal while keeping data (DB, `.env`, logs): router DNS → `192.168.1.1`,
+all units/timers removed, hooks/dispatcher/dnsmasq drop-in/nginx site
+removed, `resolved.conf` default restored. `--dry-run` previews, `--yes`
+applies; `uninstall.sh` delegates to it.
 
 ## Deploy checklist (learned the hard way — see ROADMAP incident log)
 

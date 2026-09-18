@@ -25,6 +25,12 @@ logger = logging.getLogger(__name__)
 # counts as gone. Keeps the dashboard honest between active scans.
 STALE_OFFLINE_MINUTES = 120
 
+# Even an ACTIVE scan must not offline a device for missing a single round:
+# WiFi power-save routinely drops one broadcast ARP sweep (observed live:
+# a pingable, REACHABLE host missed a sweep and flapped offline). A device
+# seen within this window stays online; only longer absences count as gone.
+OFFLINE_GRACE_MINUTES = 90
+
 
 @dataclass(frozen=True)
 class ScanSummary:
@@ -181,11 +187,18 @@ def run_discovery_cycle(
         now_dt = datetime.now(timezone.utc)
         dns_cutoff = (now_dt - timedelta(minutes=30)).isoformat()
         dns_active = storage.get_devices_with_recent_dns(conn, dns_cutoff)
-        present_ids = seen_ids | dns_active
+        grace_cutoff = (now_dt - timedelta(minutes=OFFLINE_GRACE_MINUTES)).isoformat()
+        recently_seen = storage.get_devices_seen_since(conn, grace_cutoff)
+        present_ids = seen_ids | dns_active | recently_seen
         if dns_active - seen_ids:
             logger.info(
                 "devices_kept_online_by_dns count=%d",
                 len(dns_active - seen_ids),
+            )
+        if recently_seen - seen_ids - dns_active:
+            logger.info(
+                "devices_kept_online_by_grace count=%d",
+                len(recently_seen - seen_ids - dns_active),
             )
         newly_offline = storage.mark_offline_except(conn, present_ids, now_iso)
         for device_id in newly_offline:

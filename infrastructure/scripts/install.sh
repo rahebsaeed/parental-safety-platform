@@ -70,7 +70,7 @@ rsync -a --delete \
     --exclude='.cache' \
     --exclude='.rustup' \
     --exclude='.env' \
-    "$PROJECT_SRC/" "$INSTALL_ROOT/"
+    "$PROJECT_ROOT/" "$INSTALL_ROOT/"
 # Remove stale per-user caches left by earlier buggy runs (npm/cargo ran as
 # the service user with HOME=$INSTALL_ROOT and polluted the install root).
 rm -rf "$INSTALL_ROOT/.cache" "$INSTALL_ROOT/.rustup"
@@ -169,10 +169,17 @@ if [[ -f "$INSTALL_ROOT/collector/data/discovery.sqlite3" ]]; then
 fi
 
 # 8. Log directory ----------------------------------------------------------
+# dnsmasq runs as User=nobody (hardened unit) but the collector ingester
+# runs as $SERVICE_USER — so the dir is nobody-owned with the service
+# group, and the log file is group-readable: nobody can write, the
+# ingester can read, nobody else gets in. (A 750 dir owned by
+# $SERVICE_USER once starved dnsmasq with "Permission denied".)
 log "Creating log directory..."
 mkdir -p /var/log/parental-safety
-chown "$SERVICE_USER:$SERVICE_GROUP" /var/log/parental-safety
-chmod 750 /var/log/parental-safety
+touch /var/log/parental-safety/dnsmasq.log
+chown nobody:"$SERVICE_GROUP" /var/log/parental-safety /var/log/parental-safety/dnsmasq.log
+chmod 770 /var/log/parental-safety
+chmod 660 /var/log/parental-safety/dnsmasq.log
 ok "Log directory: /var/log/parental-safety"
 
 # 9. Environment file — already created in step 3b (before migrations) ------
@@ -227,10 +234,67 @@ if [[ -f /etc/systemd/resolved.conf ]]; then
     fi
 fi
 
-# 11. Systemd units --------------------------------------------------------
+# 10b. dnsmasq config -------------------------------------------------------
+# The forwarder MUST bind 192.168.1.20 only (see the conf header: wildcard
+# binds collide with LXD/Tailscale :53 holders). install.sh used to skip
+# this file entirely, which once left an empty conf behind → wildcard bind
+# → "Address already in use" restart loop. Deploy it on every run.
+log "Deploying dnsmasq config..."
+DNSMASQ_SRC="$PROJECT_ROOT/infrastructure/dnsmasq/dnsmasq-phase2.conf"
+DNSMASQ_DST="/etc/dnsmasq.d/parental-safety-phase2.conf"
+if [[ -f "$DNSMASQ_SRC" ]]; then
+    mkdir -p /etc/dnsmasq.d
+    cp "$DNSMASQ_SRC" "$DNSMASQ_DST"
+    chmod 644 "$DNSMASQ_DST"
+    ok "dnsmasq config deployed"
+else
+    warn "$DNSMASQ_SRC not found — dnsmasq may fail to bind"
+fi
+
+# 11. Runtime scripts ------------------------------------------------------
+# The backend switches router DNS via $INSTALL_ROOT/scripts/router-dns.sh
+# (single source of truth). Deploy it plus the failsafe checker here —
+# rsync above only mirrors the repo tree, it never creates scripts/.
+log "Deploying runtime scripts..."
+mkdir -p "$INSTALL_ROOT/scripts" /var/lib/parental-safety
+for script in router-dns.sh router-dns-revert-check.sh router-dhcp-clients.sh; do
+    if [[ -f "$PROJECT_ROOT/infrastructure/scripts/$script" ]]; then
+        cp "$PROJECT_ROOT/infrastructure/scripts/$script" "$INSTALL_ROOT/scripts/$script"
+        chmod +x "$INSTALL_ROOT/scripts/$script"
+        ok "Deployed scripts/$script"
+    else
+        warn "infrastructure/scripts/$script not found, skipping"
+    fi
+done
+# Backward-compat symlink: older backend releases used
+# /opt/parental-safety/infrastructure/scripts/... — not needed anymore,
+# the canonical path is /opt/parental-safety/scripts/router-dns.sh.
+chown -R "$SERVICE_USER:$SERVICE_GROUP" "$INSTALL_ROOT/scripts"
+chown "$SERVICE_USER:$SERVICE_GROUP" /var/lib/parental-safety
+chmod 750 /var/lib/parental-safety
+
+# 12. Remove RETIRED router-DNS automation (manual-only model) -------------
+# No boot/suspend/shutdown/WiFi hook may change router DNS over HTTP. Only
+# the dashboard button (POST /api/router-dns/mode) plus the 3h failsafe
+# timer below are allowed. Re-running install must heal machines that still
+# carry the old automation.
+log "Removing retired router-DNS automation..."
+for legacy in router-dns-guard.service router-dns-on.service router-dns-off.service; do
+    systemctl disable --now "$legacy" 2>/dev/null || true
+    rm -f "$SYSTEMD_DIR/$legacy"
+done
+rm -f /etc/systemd/system-sleep/router-dns
+rm -f /etc/NetworkManager/dispatcher.d/99-router-dns-switch
+ok "Retired automation removed (guard + sleep hook + NM dispatcher)"
+
+# 13. Systemd units --------------------------------------------------------
 log "Installing systemd service units..."
 for unit_file in "$INSTALL_ROOT/infrastructure/systemd/"*.service; do
     unit_name=$(basename "$unit_file")
+    # router-dns-guard.service is retired (see §12) — never (re)install it.
+    if [[ "$unit_name" == "router-dns-guard.service" ]]; then
+        continue
+    fi
     cp "$unit_file" "$SYSTEMD_DIR/$unit_name"
     ok "Installed $unit_name"
 done
@@ -243,9 +307,10 @@ done
 
 systemctl daemon-reload
 
-for timer in parental-monitor-scan.timer parental-monitor-ai-sync.timer; do
+for timer in parental-monitor-scan.timer parental-monitor-ai-sync.timer parental-monitor-dns-revert.timer; do
     if [ -f "$SYSTEMD_DIR/$timer" ]; then
         systemctl enable "$timer"
+        systemctl start "$timer" 2>/dev/null || true
         ok "Enabled $timer"
     fi
 done
@@ -256,10 +321,11 @@ for svc in "${SERVICES[@]}"; do
     ok "Enabled and started $svc"
 done
 
-# 12. Make scripts executable ----------------------------------------------
+# 14. Make scripts executable ----------------------------------------------
 chmod +x "$INSTALL_ROOT/infrastructure/scripts/"*.sh
+chmod +x "$INSTALL_ROOT/scripts/"*.sh 2>/dev/null || true
 
-# 13. Final status ---------------------------------------------------------
+# 15. Final status ---------------------------------------------------------
 echo ""
 log "======================================================"
 log " Installation complete!"
@@ -272,65 +338,12 @@ echo ""
 echo "  Dashboard:  http://192.168.1.20/"
 echo "  API docs:   http://192.168.1.20/api/docs"
 echo ""
+echo "  Router DNS: MANUAL ONLY via the dashboard header switch."
+echo "              Filtered DNS auto-reverts to the router after"
+echo "              ROUTER_DNS_MAX_HOURS (default 3h). No boot/sleep/WiFi hooks."
+echo ""
 echo "  Password:   cat $INSTALL_ROOT/.env | grep PARENT_PASSWORD"
 echo "  Logs:       journalctl -fu parental-monitor-collector"
 echo "              journalctl -fu parental-monitor-api"
+echo "              journalctl -fu parental-monitor-dns-revert"
 echo ""
-
-# 11. Router DNS automation --------------------------------------------
-# Guard service: dnsmasq DNS while the PC is up, router fallback on the way
-# down. A persistent guard (ExecStop) is stopped BEFORE NetworkManager at
-# shutdown, so the fallback still has a live network — the old
-# Before=shutdown.target starter raced WiFi teardown and usually lost.
-# Suspend/hibernate is covered by the system-sleep hook (network is still
-# up when pre-sleep hooks run). Logout needs nothing: the WiFi connection
-# is system-wide, so it survives logout.
-
-echo ""
-echo "  [Router DNS Automation]"
-
-if [ ! -f "/scripts/router-dns.sh" ]; then
-    if [ -f "/infrastructure/scripts/router-dns.sh" ]; then
-        cp "/infrastructure/scripts/router-dns.sh"            "/scripts/router-dns.sh" 2>/dev/null || true
-        chmod +x "/scripts/router-dns.sh" 2>/dev/null || true
-    fi
-fi
-
-cp "$PROJECT_ROOT/infrastructure/systemd/router-dns-guard.service" \
-    /etc/systemd/system/router-dns-guard.service 2>/dev/null || true
-cp "$PROJECT_ROOT/infrastructure/scripts/router-dns-sleep" \
-    /etc/systemd/system-sleep/router-dns 2>/dev/null || true
-chmod +x /etc/systemd/system-sleep/router-dns 2>/dev/null || true
-
-# Retire the racy on/off pair in favour of the guard.
-systemctl disable router-dns-on.service 2>/dev/null || true
-systemctl disable router-dns-off.service 2>/dev/null || true
-rm -f /etc/systemd/system/router-dns-on.service \
-    /etc/systemd/system/router-dns-off.service 2>/dev/null || true
-
-systemctl daemon-reload 2>/dev/null || true
-systemctl enable router-dns-guard.service 2>/dev/null || true
-echo "  Router DNS automation installed (guard + suspend hook)"
-
-# 12. NetworkManager dispatcher (WiFi lid close → set router DNS) ----
-log "Installing NetworkManager WiFi dispatcher..."
-NM_DISPATCHER_SRC="$PROJECT_ROOT/infrastructure/scripts/99-router-dns-switch"
-NM_DISPATCHER_DST="/etc/NetworkManager/dispatcher.d/99-router-dns-switch"
-if [ -f "$NM_DISPATCHER_SRC" ]; then
-    cp "$NM_DISPATCHER_SRC" "$NM_DISPATCHER_DST" 2>/dev/null || true
-    chmod +x "$NM_DISPATCHER_DST" 2>/dev/null || true
-    ok "NetworkManager dispatcher installed"
-else
-    warn "99-router-dns-switch not found, skipping"
-fi
-
-# 13. Systemd units ------------------------------------------------------
-log "Installing systemd service units..."
-
-# 14. Router DHCP client list script -------------------------------
-log "Installing router DHCP client list script..."
-if [ -f "/infrastructure/scripts/router-dhcp-clients.sh" ]; then
-    cp "/infrastructure/scripts/router-dhcp-clients.sh"        "/scripts/router-dhcp-clients.sh" 2>/dev/null || true
-    chmod +x "/scripts/router-dhcp-clients.sh" 2>/dev/null || true
-    ok "Router DHCP client list script installed"
-fi

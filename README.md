@@ -7,7 +7,7 @@ capabilities (no keylogging, message interception, webcam/mic capture,
 screen capture, or credential theft — see `docs/architecture/phase-1-discovery.md`
 for the full boundary).
 
-## Status: All 17 Phases Complete ✅
+## Status: All 18 Phases Complete ✅
 
 The full system is built, deployed, and running in production on
 Ubuntu `192.168.1.20` (`wlp0s20f3`, subnet `192.168.1.0/24`):
@@ -29,6 +29,7 @@ Ubuntu `192.168.1.20` (`wlp0s20f3`, subnet `192.168.1.0/24`):
 - **Phase 15** — AI-assisted classification (OpenRouter free models → persisted rules) ✅
 - **Phase 16** — Safe-DNS failover control (header badge + switch, suspend/shutdown automation) ✅
 - **Phase 17** — Discovery hardening (router DHCP leases, DNS-driven placeholders, hourly scans) ✅
+- **Phase 18** — Manual-only Safe-DNS + 3h failsafe + return-to-normal reset ✅
 
 See `docs/ROADMAP.md` for the full phase-by-phase plan, what's been
 confirmed about this specific network, and a running incident log.
@@ -82,7 +83,7 @@ are protected; the login page redirects unauthenticated users.
 | Web server | `nginx` | Serves React + proxies `/api` on port 80 |
 | Hourly discovery scan | `parental-monitor-scan.timer` | ARP + router DHCP leases, keeps IP→device mapping fresh |
 | Hourly AI classification sync | `parental-monitor-ai-sync.timer` | Static rules, then top-20 unknowns to OpenRouter, persisted as rules |
-| Router DNS guard | `parental-monitor-guard` + `system-sleep/router-dns` + NM dispatcher | dnsmasq DNS while PC is up, router fallback on suspend/shutdown/WiFi-drop |
+| 3h Safe-DNS failsafe | `parental-monitor-dns-revert.timer` (every 5 min) | Reverts router DNS to default if filtered mode exceeds `ROUTER_DNS_MAX_HOURS` (default 3h). The ONLY automation allowed to touch router DNS |
 
 Remote access via [Tailscale](https://tailscale.com) (`100.99.54.78`).
 No router port-forwards exist.
@@ -107,17 +108,30 @@ once, then cached forever:
   paced 5s apart. Key is entered in Settings, validated with Test, and
   stored in the `settings` DB table — never in `.env` or git.
 
-## Router DNS failover
+## Router DNS control (manual-only + 3h failsafe)
 
 Protection only works while the router advertises this PC (`192.168.1.20`)
 as DNS. The header on every dashboard page shows the router's **actual**
 reported DNS (green `rosa-PC` = filtered, amber `Router` = unfiltered)
-with a one-click switch (`GET/POST /api/router-dns/*`). Automation covers
-every PC state: boot and shutdown via `router-dns-guard.service`
-(ExecStop runs *before* NetworkManager stops, so the fallback still has
-network), suspend/hibernate via the `system-sleep` hook, WiFi drops via
-the NetworkManager dispatcher. Logout needs nothing — the WiFi
-connection is system-wide and survives it.
+with a one-click switch (`GET/POST /api/router-dns/*`) — switching asks
+for confirmation first.
+
+Switching is **manual only**: no boot/shutdown/suspend/WiFi hook touches
+the router (they caused a WiFi-connected-but-no-internet outage and were
+removed; re-running `install.sh` deletes any leftover copies). The sole
+automation is a **3-hour failsafe** (`parental-monitor-dns-revert.timer`,
+every 5 min): enabling filtered DNS starts a deadline
+(`ROUTER_DNS_MAX_HOURS`, default 3), the header counts down to it, `+3h`
+restarts the clock, and expiry flips the router back to `192.168.1.1`
+automatically in case you forget it on.
+
+If anything ever breaks networking, run the emergency reset (keeps your
+database, password, and logs, removes only what the project added):
+
+```bash
+sudo bash infrastructure/scripts/reset-to-normal.sh --dry-run  # preview
+sudo bash infrastructure/scripts/reset-to-normal.sh --yes      # apply
+```
 
 ## Read next
 

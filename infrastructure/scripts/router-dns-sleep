@@ -1,4 +1,6 @@
 #!/bin/bash
+# RETIRED — manual-only model: install.sh no longer installs this hook and
+# removes any deployed copy. Kept in-tree for history.
 # =============================================================================
 # router-dns-sleep — systemd-sleep hook for suspend/hibernate
 # Installed to /etc/systemd/system-sleep/router-dns (must be executable).

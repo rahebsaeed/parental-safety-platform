@@ -1,44 +1,28 @@
 #!/usr/bin/env bash
 # =============================================================================
-# uninstall.sh — Remove systemd units, nginx config, and service account
+# uninstall.sh — Remove the platform cleanly (keeps your data).
 # =============================================================================
+# Delegates to reset-to-normal.sh, the single source of truth for undoing
+# everything install.sh ever touched: router DNS back to 192.168.1.1,
+# all systemd units/timers, sleep hook, NM dispatcher, dnsmasq drop-in,
+# nginx site, resolved.conf default, AppArmor exception, failsafe deadline.
+#
 # Does NOT delete /opt/parental-safety/collector/data (your database)
-# or /opt/parental-safety/.env (your secrets). Run manually to delete those.
+# or /opt/parental-safety/.env (your secrets) — pass --delete-opt to the
+# reset script for that (irreversible).
 #
 # Usage:
-#   sudo ./infrastructure/scripts/uninstall.sh
+#   sudo ./infrastructure/scripts/uninstall.sh            # dry-run first
+#   sudo ./infrastructure/scripts/uninstall.sh --yes     # DO the uninstall
 # =============================================================================
-set -euo pipefail
+set -u
 
-INSTALL_ROOT="/opt/parental-safety"
-SERVICE_USER="parental-monitor"
-SERVICES=(parental-monitor-api parental-monitor-collector)
-NGINX_CONF="/etc/nginx/sites-enabled/parental-monitor"
-NGINX_AVAIL="/etc/nginx/sites-available/parental-monitor"
-SYSTEMD_DIR="/etc/systemd/system"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-[[ "$EUID" -eq 0 ]] || { echo "Run as root: sudo $0" >&2; exit 1; }
-
-echo "[uninstall] Stopping and disabling services..."
-for svc in "${SERVICES[@]}"; do
-    systemctl stop "$svc"    2>/dev/null && echo "  Stopped  $svc" || true
-    systemctl disable "$svc" 2>/dev/null && echo "  Disabled $svc" || true
-    rm -f "$SYSTEMD_DIR/${svc}.service"
-done
-systemctl daemon-reload
-
-echo "[uninstall] Removing nginx configuration..."
-rm -f "$NGINX_CONF" "$NGINX_AVAIL"
-if command -v nginx &>/dev/null && nginx -t 2>/dev/null; then
-    systemctl reload nginx
+if [[ "${1:-}" == "--yes" ]]; then
+    exec "$SCRIPT_DIR/reset-to-normal.sh" --yes
+else
+    echo "[uninstall] Showing what would be removed (dry-run). Re-run with --yes to apply."
+    echo ""
+    exec "$SCRIPT_DIR/reset-to-normal.sh" --dry-run
 fi
-
-echo "[uninstall] Uninstall complete."
-echo ""
-echo "  Data and .env preserved at:"
-echo "    $INSTALL_ROOT/collector/data/"
-echo "    $INSTALL_ROOT/.env"
-echo ""
-echo "  To fully remove everything:"
-echo "    sudo rm -rf $INSTALL_ROOT"
-echo "    sudo userdel $SERVICE_USER"

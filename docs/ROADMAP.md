@@ -425,6 +425,35 @@ onto unrelated devices (`.5` → dev_07 while dev_07 sat at `.6`).
   DHCP moves; **timestamps fixed** (dnsmasq local time was stamped as
   UTC, +1h skew on every row).
 
+## Phase 18 — Manual-Only DNS + 3h Failsafe + Return-to-Normal ✅ Complete (2026-09-18)
+
+The auto-ON hooks (boot guard, resume hook, WiFi dispatcher) pointed the
+whole LAN at `192.168.1.20` even when the PC wasn't ready to resolve,
+causing a WiFi-connected-but-no-internet outage that had to be fixed by
+hand under `/etc/`. Response, per operator request:
+
+- **Manual-only switching**: `router-dns-guard.service`,
+  `/etc/systemd/system-sleep/router-dns`, and
+  `/etc/NetworkManager/dispatcher.d/99-router-dns-switch` are retired
+  (sources kept in-tree with RETIRED headers for history; `install.sh`
+  disables/deletes any deployed copies and never reinstalls them). The
+  dashboard header switch (`POST /api/router-dns/mode`, now with a
+  confirmation prompt) is the sole writer besides the failsafe below.
+- **3-hour failsafe**: enabling filtered DNS writes
+  `/var/lib/parental-safety/router-dns-deadline` (`ROUTER_DNS_MAX_HOURS`,
+  default 3); `parental-monitor-dns-revert.timer` (every 5 min,
+  `Persistent=true`) runs `router-dns-revert-check.sh`, which flips the
+  router back to `192.168.1.1` once the deadline passes. Status responses
+  carry `max_hours/enabled_at/expires_at/seconds_remaining`; the header
+  shows a countdown with early-off and `+3h` extend buttons.
+- **Emergency reset**: `infrastructure/scripts/reset-to-normal.sh`
+  (`--dry-run`/`--yes`, `--delete-opt`/`--delete-user` for nuclear) heals
+  the router first, then removes every unit/timer/hook/dispatcher/drop-in/
+  nginx site the project added, restores `resolved.conf` and AppArmor —
+  while keeping the DB, `.env`, logs, and OS packages. `uninstall.sh`
+  now delegates to it. `install.sh` path bugs fixed (`$PROJECT_SRC` →
+  `$PROJECT_ROOT`, runtime scripts deployed to `/opt/parental-safety/scripts/`).
+
 ## Incident Log
 
 A running record of real production incidents, for the same reason
@@ -443,4 +472,11 @@ hypothetical ones.
 | 2026-09-14 | S24-Ultra's requests split across dev_07/NULL; new devices stuck Unassigned | Same-subnet fallback in `resolve_device_id_for_ip` attributed unknown IPs to the most-recently-seen device; scans (the only mapping source) missed DHCP-moved/static-IP hosts | Deleted the fallback (exact-match only); ingester creates IP-only placeholders on first sighting; scans enrich via IP-adoption; hourly scan timer; backfilled `.5` → dev_05 after backup | Unknown private IP can no longer stay Unassigned past its first query |
 | 2026-09-14 | Every `occurred_at` 1h in the future | `log_parser` stamped dnsmasq's local-time log lines as UTC | Interpret naive stamps as local, convert to UTC (round-trip test included) | New rows match real UTC; old rows left as-is (documented skew window) |
 | 2026-09-14 | `/api/domains/security` 500 on any UNKNOWN domain | Half-applied `/opt`-only edit constructed `DomainSecurity(...)` without importing it; repo copy didn't match prod | Removed the block; stored rules now take precedence over keywords in all three endpoints; repo↔`/opt` diff-checked | Deploy checklist: diff repo vs `/opt` for every touched backend file before restart |
+| 2026-09-18 | PC on WiFi but no internet; all services stopped by hand under `/etc/` | Automatic router-DNS hooks (boot guard / resume / WiFi-up) advertised `192.168.1.20` while the PC couldn't resolve, black-holing LAN DNS | Internet restored manually; automation retired (Phase 18: manual-only + 3h failsafe + `reset-to-normal.sh`) | Never auto-point LAN DNS at a host without a health-checked resolver; every auto-DNS change needs a revert path and a one-command reset |
+| 2026-09-18 | Dashboard showed 9 online vs router's 8 connected | The 9th row was the gateway itself (`.1`) — the router never counts itself, but the online list did | `is_gateway` flag on devices; `?status=online` excludes the gateway (stays under All + DB for attribution); Devices tab defaults to online, offline only on the Offline tab | Online counts must mirror the router's definition: infrastructure is inventory, not a client |
+| 2026-09-18 | Present PC flapped offline after one scan (pingable + REACHABLE, missed a single ARP sweep) | WiFi power-save drops individual broadcast rounds; one miss meant instant offline | 90-min `OFFLINE_GRACE_MINUTES` in the active-scan path (seen + DNS-active + recently-seen = present) | Presence needs hysteresis — a single missed round is radio behavior, not departure |
+| 2026-09-18 | API 500 `file is not a database` after a manual repo→`/opt` rsync | rsync without install.sh's `--exclude` list overwrote the live `-wal`/`-shm` with a foreign pair | Stopped services, deleted foreign WAL/SHM (main DB intact, integrity ok), restored from there + took a real backup; rule: never hand-rsync — use install.sh or exclude `collector/data` | Treat `-wal`/`-shm` as part of the live DB; keep scheduled backups (backups/ was empty) |
+| 2026-09-18 | Only 2 of 8 devices' DNS visible despite router DNS = `.20` | 24h DHCP leases: devices keep the old DNS until lease renewal; only reconnected hosts (this PC, one phone) used the new forwarder | Reboot the router once so every device re-DHCPS and picks up `.20` within ~2 min (per-device WiFi toggle works too, slower) | After any router-DNS switch, propagation is the bottleneck — a 1-day lease means up to a day of partial visibility without a reboot |
+| 2026-09-18 | 3h failsafe deadline never written (`Read-only file system`) | API unit's `ProtectSystem=strict` lacked `ReadWritePaths` for `/var/lib/parental-safety`; failure was silent (warning only) | Added the path to `parental-monitor-api.service`; deadline now written + verified | Every state file a hardened service writes needs an explicit `ReadWritePaths`; silent-degrade paths must be verified live, not just logged |
+| 2026-09-18 | Only 2/8 devices visible after DNS switch; reboot-per-switch demanded | 24h DHCP lease: clients keep old DNS until renewal (up to a day) | `router-dns.sh` now enforces a 600s lease on every switch (renew ~5 min); one final reboot activates it, then all future switches propagate in minutes, and outage recovery shortens too | DHCP lease time is the propagation speed limit — set it short once, never reboot per change again |
 | 2026-09-14 | `L.map`/`w.map`/`q.map is not a function` console errors | Misdiagnosed as minifier bug twice (renames, terser) — actually `GET /api/activity` returns `{items:[...]}` and callers mapped the envelope object | Unwrap `.items` in `api.getActivity` + `Array.isArray` guards | API doc now states paginated shape explicitly; verify with Network tab, not bundle archaeology |

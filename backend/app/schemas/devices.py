@@ -33,6 +33,7 @@ class DeviceSummary(BaseModel):
     current_ip: Optional[str] = None
     query_count: int = 0
     dns_visibility: str = "FULL"  # "FULL", "PARTIAL", or "NONE"
+    is_gateway: bool = False  # True when current_ip is the LAN default gateway (the router itself)
 
 
 class DeviceDetail(DeviceSummary):

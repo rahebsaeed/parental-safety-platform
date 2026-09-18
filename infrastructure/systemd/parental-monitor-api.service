@@ -34,7 +34,7 @@ CapabilityBoundingSet=CAP_NET_RAW CAP_NET_ADMIN
 AmbientCapabilities=CAP_NET_RAW CAP_NET_ADMIN
 ProtectSystem=strict
 ProtectHome=yes
-ReadWritePaths=/opt/parental-safety/collector/data /opt/parental-safety/.env
+ReadWritePaths=/opt/parental-safety/collector/data /opt/parental-safety/.env /var/lib/parental-safety
 PrivateTmp=yes
 PrivateDevices=yes
 

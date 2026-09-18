@@ -8,9 +8,11 @@ const POLL_INTERVAL_MS = 30000;
 /**
  * Router DNS badge + manual switch, shown in the app header.
  *
- * The badge always reflects the router's *actual* reported DNS (polled),
- * so suspend/shutdown automation, the WiFi dispatcher, or a change made
- * from another device can never leave the UI lying about the current mode.
+ * MANUAL-ONLY model: no boot/suspend/shutdown/WiFi automation changes the
+ * router — only this button (POST /api/router-dns/mode). Enabling filtered
+ * DNS starts a failsafe deadline (default 3h); the revert timer flips the
+ * router back to default automatically. The badge always reflects the
+ * router's *actual* reported DNS (polled every 30s) plus the countdown.
  */
 export const RouterDnsControl: React.FC = () => {
   const [status, setStatus] = useState<RouterDnsStatus | null>(null);
@@ -33,9 +35,15 @@ export const RouterDnsControl: React.FC = () => {
     return () => window.clearInterval(timer);
   }, [refresh]);
 
-  const handleSwitch = async () => {
+  const handleSwitch = async (extend = false) => {
     if (!status || switching) return;
-    const target = status.mode === 'dnsmasq' ? 'router' : 'dnsmasq';
+    // Extend = re-enable filtered DNS to restart the failsafe clock.
+    const target = extend ? 'dnsmasq' : status.mode === 'dnsmasq' ? 'router' : 'dnsmasq';
+    const confirmMsg =
+      target === 'dnsmasq'
+        ? `Route the whole LAN through this PC for filtering (auto-reverts to Router DNS after ~${status.max_hours ?? 3}h)?`
+        : 'Fall back to Router DNS now (unfiltered)?';
+    if (!window.confirm(confirmMsg)) return;
     setSwitching(true);
     setError(null);
     try {
@@ -46,6 +54,15 @@ export const RouterDnsControl: React.FC = () => {
     } finally {
       setSwitching(false);
     }
+  };
+
+  const formatRemaining = (secs: number | null | undefined): string | null => {
+    if (secs === null || secs === undefined) return null;
+    const h = Math.floor(secs / 3600);
+    const m = Math.floor((secs % 3600) / 60);
+    if (h > 0) return `${h}h ${m}m left`;
+    if (m > 0) return `${m}m left`;
+    return `<1m left`;
   };
 
   const mode = status?.mode ?? 'unknown';
@@ -60,10 +77,11 @@ export const RouterDnsControl: React.FC = () => {
     ? `DNS: Router (${status?.pridns})`
     : 'DNS: ?';
 
+  const remaining = formatRemaining(status?.seconds_remaining);
   const tooltip = isDnsmasq
-    ? 'Router points at this PC — traffic is filtered and logged. Click to fall back to the router (unfiltered).'
+    ? `Router points at this PC — filtered + logged. Auto-reverts to Router DNS ${remaining ? `in ${remaining}` : `after ~${status?.max_hours ?? 3}h`} if you forget. Click to fall back now.`
     : isRouter
-    ? 'Router points at itself — traffic is UNFILTERED. Click to route through this PC (filtered + logged).'
+    ? `Router points at itself — UNFILTERED. Click to filter through this PC (auto-reverts after ~${status?.max_hours ?? 3}h).`
     : 'Could not read router DNS. Check the router is reachable, then retry.';
 
   return (
@@ -88,8 +106,14 @@ export const RouterDnsControl: React.FC = () => {
         <span style={{ color: iconColor }}>{label}</span>
       </div>
 
+      {isDnsmasq && remaining && (
+        <span style={{ color: iconColor, fontSize: '0.8rem', whiteSpace: 'nowrap' }} title={`Auto-reverts at ${status?.expires_at ?? 'deadline'}`}>
+          ⏳ {remaining}
+        </span>
+      )}
+
       <button
-        onClick={handleSwitch}
+        onClick={() => handleSwitch(false)}
         disabled={switching || (!isDnsmasq && !isRouter)}
         className="btn btn-secondary btn-sm"
         title={tooltip}
@@ -97,6 +121,17 @@ export const RouterDnsControl: React.FC = () => {
         <ArrowLeftRight size={14} className={switching ? 'spin' : ''} />
         <span>{switching ? 'Switching...' : isDnsmasq ? 'Use Router DNS' : 'Use rosa-PC DNS'}</span>
       </button>
+
+      {isDnsmasq && (
+        <button
+          onClick={() => handleSwitch(true)}
+          disabled={switching}
+          className="btn btn-secondary btn-sm"
+          title={`Restart the ~${status?.max_hours ?? 3}h failsafe clock from now`}
+        >
+          <span>+{status?.max_hours ?? 3}h</span>
+        </button>
+      )}
     </div>
   );
 };

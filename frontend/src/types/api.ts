@@ -30,6 +30,7 @@ export interface Device {
   current_ip?: string;
   query_count?: number;
   dns_visibility?: 'FULL' | 'PARTIAL';
+  is_gateway?: boolean;
 }
 
 export interface DeviceAddress {
@@ -192,6 +193,10 @@ export interface RouterDnsStatus {
   secdns: string | null;
   dnsmasq_ip: string;
   router_ip: string;
+  max_hours: number;
+  enabled_at: string | null;
+  expires_at: string | null;
+  seconds_remaining: number | null;
 }
 
 export type RealtimeEventType = 'dns_activity' | 'safety_alert' | 'device_status' | 'connected' | 'pong';

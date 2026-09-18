@@ -37,6 +37,25 @@ def _parse_iso(value: str | None) -> datetime | None:
     return dt
 
 
+def _detect_gateway_ip() -> str | None:
+    """Return this host's LAN default-gateway IP, or None if undetectable.
+
+    Used to flag the router itself (is_gateway) so the online device list
+    mirrors the router's own connected-client count, which never includes
+    itself. Lazy import keeps the collector package out of backend import
+    time; any failure degrades to None (no exclusion, no flag) rather than
+    breaking the device list.
+    """
+    try:
+        from collector.device_discovery.network_info import (  # noqa: PLC0415
+            detect_network_info,
+        )
+
+        return detect_network_info().gateway_ip
+    except Exception:
+        return None
+
+
 def _effective_status(stored_status: str, last_seen_iso: str | None) -> str:
     """Return 'online' only if the device was seen recently."""
     if (stored_status or "").lower() != "online":
@@ -100,11 +119,12 @@ class Repository:
         query += " ORDER BY d.last_seen DESC;"
 
         rows = conn.execute(query, []).fetchall()
+        gateway_ip = _detect_gateway_ip()
         devices = []
         for r in rows:
             q_count = r["query_count"] or 0
             p_count = r["partial_query_count"] or 0
-            
+
             # Determine visibility flag
             if q_count == 0:
                 visibility = "NONE"
@@ -115,6 +135,14 @@ class Repository:
 
             effective = _effective_status(r["status"], r["last_seen"])
             if status_filter and effective != status_filter.lower():
+                continue
+
+            is_gateway = bool(gateway_ip and r["current_ip"] == gateway_ip)
+            if is_gateway and (status_filter or "").lower() == "online":
+                # The router never counts itself among connected clients —
+                # neither do we in the online view. It stays visible under
+                # the unfiltered list and keeps its DB record for DNS
+                # attribution.
                 continue
 
             devices.append(
@@ -132,6 +160,7 @@ class Repository:
                     current_ip=r["current_ip"],
                     query_count=q_count,
                     dns_visibility=visibility,
+                    is_gateway=is_gateway,
                 )
             )
         return devices
@@ -244,6 +273,8 @@ class Repository:
         else:
             visibility = "FULL"
 
+        gateway_ip = _detect_gateway_ip()
+
         return DeviceDetail(
             device_id=row["device_id"],
             friendly_name=row["friendly_name"],
@@ -258,6 +289,7 @@ class Repository:
             current_ip=row["current_ip"],
             query_count=q_count,
             dns_visibility=visibility,
+            is_gateway=bool(gateway_ip and row["current_ip"] == gateway_ip),
             addresses=addresses,
             status_events=status_events,
             recent_domains=recent_domains,

@@ -160,7 +160,7 @@ export const api = {
     return fetchJson<{categories: {category: string; domains: {domain: string; query_count: number}[]; total_queries: number}[]}>(`${BASE_URL}/openrouter/top-domains-by-category${qp.toString() ? '?' + qp.toString() : ''}`);
   },
   login: (password: string) => fetchJson<{ message: string }>(`${BASE_URL}/auth/login`, { method: 'POST', body: JSON.stringify({ password }) }),
-  changePassword: (currentPassword: string, newPassword: string) => fetchJson<{ message: string }>(`${BASE_URL}/auth/change-password`, { method: 'PUT', body: JSON.stringify({ currentPassword, newPassword }) }),
+  changePassword: (currentPassword: string, newPassword: string) => fetchJson<{ message: string }>(`${BASE_URL}/auth/change-password`, { method: 'POST', body: JSON.stringify({ current_password: currentPassword, new_password: newPassword }) }),
   getAuthStatus: () => fetchJson<SessionInfo>(`${BASE_URL}/auth/status`),
   logout: () => fetchJson<{ message: string }>(`${BASE_URL}/auth/logout`, { method: 'POST' }),
   getRouterDnsStatus: () => fetchJson<RouterDnsStatus>(`${BASE_URL}/router-dns/status`),

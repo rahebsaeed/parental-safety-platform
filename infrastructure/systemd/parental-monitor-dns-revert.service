@@ -1,0 +1,23 @@
+[Unit]
+Description=Parental Safety Platform — 3h Safe-DNS failsafe revert to router DNS
+Documentation=https://github.com/local/parental-safety-platform
+# The ONLY automation allowed to change router DNS over HTTP. Manual ON
+# writes /var/lib/parental-safety/router-dns-deadline; this oneshot reverts
+# to 192.168.1.1 once the deadline passes. Safe when the router is already
+# on default (router-dns.sh off is idempotent) and never fails the timer.
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=root
+ExecStart=/opt/parental-safety/scripts/router-dns-revert-check.sh
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=parental-monitor-dns-revert
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+ReadWritePaths=/var/lib/parental-safety
+EnvironmentFile=-/opt/parental-safety/.env

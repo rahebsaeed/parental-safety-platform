@@ -1,4 +1,6 @@
 #!/bin/bash
+# RETIRED — manual-only model: install.sh no longer installs this dispatcher
+# script and removes any deployed copy. Kept in-tree for history.
 # =============================================================================
 # 99-router-dns-switch — NetworkManager dispatcher script
 # Automatically switches router DNS based on WiFi connectivity

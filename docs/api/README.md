@@ -20,7 +20,7 @@ Full service specification: [docs/architecture/phase-3-backend-api.md](../archit
 
 | Method & path | Purpose |
 |---|---|
-| `GET /api/devices[?status=]` | Discovered devices with IP/MAC/visibility |
+| `GET /api/devices[?status=]` | Discovered devices with IP/MAC/visibility (`is_gateway` flags the router; `?status=online` excludes it so the count matches the router's own client list) |
 | `GET /api/devices/{id}` | Detail: address history, top domains |
 | `PATCH /api/devices/{id}` | Rename / reclassify |
 | `POST /api/devices/scan` | Trigger a discovery scan now |
@@ -66,8 +66,8 @@ AI verdicts map onto rule categories (`UNSAFE`/`GAMBLING` → `ADULT_CONTENT`,
 
 | Method & path | Purpose |
 |---|---|
-| `GET /api/router-dns/status` | Router-reported DNS (`mode`: `dnsmasq`/`router`/`custom`/`unknown`/`unreachable`) |
-| `POST /api/router-dns/mode` | `{"mode":"dnsmasq"\|"router"}` — delegates to `scripts/router-dns.sh` |
+| `GET /api/router-dns/status` | Router-reported DNS (`mode`: `dnsmasq`/`router`/`custom`/`unknown`/`unreachable`) + 3h failsafe countdown (`max_hours`, `enabled_at`, `expires_at`, `seconds_remaining`) |
+| `POST /api/router-dns/mode` | `{"mode":"dnsmasq"\|"router"}` — manual switch via `scripts/router-dns.sh`; `dnsmasq` starts the failsafe deadline, `router` clears it |
 
 ### OpenRouter AI
 
