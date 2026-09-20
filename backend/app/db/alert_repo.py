@@ -102,6 +102,7 @@ def list_alerts(
     status: Optional[str] = None,
     severity: Optional[str] = None,
     device_id: Optional[str] = None,
+    domain: Optional[str] = None,
     limit: int = 50,
     offset: int = 0,
 ) -> list[SafetyAlert]:
@@ -113,6 +114,8 @@ def list_alerts(
         q = q.filter(SafetyAlert.severity == severity.upper())
     if device_id:
         q = q.filter(SafetyAlert.device_id == device_id)
+    if domain:
+        q = q.filter(SafetyAlert.domain == domain.strip().lower().rstrip("."))
 
     return q.order_by(SafetyAlert.last_seen_at.desc(), SafetyAlert.id.desc()).offset(offset).limit(limit).all()
 

@@ -12,6 +12,7 @@ class SafetyAlertRead(BaseModel):
 
     id: int
     device_id: Optional[str] = None
+    device_name: Optional[str] = None
     domain: str
     alert_type: str
     severity: str

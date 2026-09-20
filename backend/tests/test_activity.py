@@ -58,3 +58,23 @@ def test_list_activity_filter_response_status(client: TestClient) -> None:
     data = response.json()
     assert data["total"] == 1
     assert data["items"][0]["domain"] == "badtracker.evil"
+
+
+def test_query_types_endpoint(client: TestClient) -> None:
+    response = client.get("/api/activity/types")
+    assert response.status_code == 200
+    types = {row["query_type"] for row in response.json()}
+    assert {"A", "AAAA"} <= types
+
+
+def test_activity_items_carry_category_and_tags(client: TestClient, test_db) -> None:
+    test_db.execute(
+        "INSERT INTO domain_classifications (domain, category) VALUES"
+        " ('youtube.com', 'STREAMING_VIDEO')"
+    )
+    test_db.commit()
+    response = client.get("/api/activity?domain=youtube.com&limit=1")
+    assert response.status_code == 200
+    item = response.json()["items"][0]
+    assert item["category"] == "STREAMING_VIDEO"
+    assert isinstance(item["tags"], list)

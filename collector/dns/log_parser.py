@@ -52,8 +52,13 @@ _QUERY_RE = re.compile(
     + r"query\[(?P<qtype>[A-Za-z0-9]+)\]\s+(?P<domain>\S+)\s+from\s+(?P<source_ip>\S+)"
 )
 _REPLY_RE = re.compile(
-    _PREFIX + r"reply\s+(?P<domain>\S+)\s+is\s+(?P<answer>\S+)"
+    _PREFIX + r"reply\s+(?P<domain>\S+)\s+is\s+(?P<answer>.+?)\s*$"
 )
+
+# Non-address answers (CNAME targets, MX exchanges, SRV targets, TXT
+# snippets, PTR names) are kept as short text so those query types stay
+# inspectable instead of storing an empty answer.
+_MAX_ANSWER_TEXT = 255
 _NXDOMAIN_RE = re.compile(
     _PREFIX + r"(?P<status>NXDOMAIN|SERVFAIL|REFUSED)\s+(?P<domain>\S+)"
 )
@@ -144,15 +149,21 @@ class LogParser:
         # ── reply line ──────────────────────────────────────────────────────
         m = _REPLY_RE.search(line)
         if m and self._pending:
-            answer = m.group("answer")
+            answer = m.group("answer").strip().strip('"')
             domain = m.group("domain").rstrip(".")
             if domain == self._pending.domain:
                 if answer.upper() in ("NXDOMAIN", "NODATA", "NODATA-IPV4", "NODATA-IPV6"):
                     self._pending.response_status = "NXDOMAIN"
-                elif re.match(r"^\d+\.\d+\.\d+\.\d+$", answer) or ":" in answer:
-                    # IPv4 or IPv6 address
+                elif re.match(r"^\d+\.\d+\.\d+\.\d+$", answer) or (
+                    ":" in answer and re.match(r"^[0-9a-fA-F:.]+$", answer)
+                ):
+                    # IPv4 address, or IPv6 address (hex/colons only — a TXT
+                    # record containing ':' plus other text falls through
+                    # to the text branch below).
                     self._pending.resolved_addresses.append(answer)
-                # other values (CNAME targets etc.) are silently skipped
+                elif answer:
+                    # CNAME / MX / SRV / TXT / PTR answer text (truncated).
+                    self._pending.resolved_addresses.append(answer[:_MAX_ANSWER_TEXT])
             return None
 
         # ── inline NXDOMAIN/SERVFAIL line ───────────────────────────────────

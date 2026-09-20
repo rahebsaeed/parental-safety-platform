@@ -46,3 +46,14 @@ def get_activity(
         offset=offset,
         items=items,
     )
+
+
+@router.get(
+    "/types",
+    summary="Observed DNS Query Types",
+    description="Distinct query types seen in dns_queries with counts (A, AAAA, HTTPS, MX, TXT, …) for building UI filters.",
+)
+def get_query_types(
+    conn: sqlite3.Connection = Depends(get_db),
+) -> list[dict]:
+    return Repository.query_type_counts(conn)

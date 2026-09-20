@@ -8,6 +8,10 @@ import type {
   DomainClassification,
   DomainSecurityResponse,
   DangerousDomain,
+  ProxyRequestItem,
+  ProxySearchItem,
+  QueryTypeCount,
+  SearchEnginesResponse,
   SubjectResponse,
   HealthStatus,
   RouterDnsStatus,
@@ -49,25 +53,60 @@ export const api = {
     fetchJson<Device>(`${BASE_URL}/devices/${encodeURIComponent(deviceId)}`, {
       method: 'PATCH', body: JSON.stringify(payload),
     }),
-  getActivity: (params: { device_id?: string; domain?: string; visibility?: string; status?: string; limit?: number; offset?: number }) => {
+  getActivity: (params: { device_id?: string; domain?: string; visibility?: string; status?: string; query_type?: string; limit?: number; offset?: number }) => {
     const qp = new URLSearchParams();
     if (params.device_id) qp.set('device_id', params.device_id);
     if (params.domain) qp.set('domain', params.domain);
     if (params.visibility) qp.set('visibility', params.visibility);
     if (params.status) qp.set('status', params.status);
+    if (params.query_type) qp.set('query_type', params.query_type);
     if (params.limit) qp.set('limit', String(params.limit));
     if (params.offset) qp.set('offset', String(params.offset));
     return fetchJson<DnsQuery[] | { items: DnsQuery[] }>(`${BASE_URL}/activity?${qp.toString()}`).then(
       (res: unknown): DnsQuery[] => (Array.isArray(res) ? res : ((res as { items?: DnsQuery[] })?.items ?? [])),
     );
   },
-  getAlerts: (params?: { status?: string; severity?: string; device_id?: string }) => {
+  getQueryTypes: () => fetchJson<QueryTypeCount[]>(`${BASE_URL}/activity/types`),
+  getAlerts: (params?: { status?: string; severity?: string; device_id?: string; domain?: string }) => {
     const qp = new URLSearchParams();
     if (params?.status) qp.set('status', params.status);
     if (params?.severity) qp.set('severity', params.severity);
     if (params?.device_id) qp.set('device_id', params.device_id);
+    if (params?.domain) qp.set('domain', params.domain);
     return fetchJson<SafetyAlert[]>(`${BASE_URL}/alerts?${qp.toString()}`);
   },
+  getSearchEngines: (deviceId?: string, days = 7) => {
+    const qp = new URLSearchParams({ days: String(days) });
+    if (deviceId) qp.set('device_id', deviceId);
+    return fetchJson<SearchEnginesResponse>(`${BASE_URL}/analytics/search-engines?${qp.toString()}`);
+  },
+  getProxyRequests: (params: { device_id?: string; domain?: string; method?: string; hide_local?: boolean; limit?: number; offset?: number }) => {
+    const qp = new URLSearchParams();
+    if (params.device_id) qp.set('device_id', params.device_id);
+    if (params.domain) qp.set('domain', params.domain);
+    if (params.method) qp.set('method', params.method);
+    if (params.hide_local === false) qp.set('hide_local', 'false');
+    if (params.limit) qp.set('limit', String(params.limit));
+    if (params.offset) qp.set('offset', String(params.offset));
+    return fetchJson<{ total: number; limit: number; offset: number; items: ProxyRequestItem[] }>(`${BASE_URL}/proxy/requests?${qp.toString()}`);
+  },
+  getProxySearches: (deviceId?: string, days = 30) => {
+    const qp = new URLSearchParams({ days: String(days) });
+    if (deviceId) qp.set('device_id', deviceId);
+    return fetchJson<ProxySearchItem[]>(`${BASE_URL}/proxy/searches?${qp.toString()}`);
+  },
+  getProxyCoverage: (days = 7) =>
+    fetchJson<{
+      days: number;
+      devices: {
+        device_id: string;
+        device_name: string;
+        dns_queries: number;
+        proxy_requests: number;
+        has_proxy: boolean;
+        last_proxy_seen: string | null;
+      }[];
+    }>(`${BASE_URL}/proxy/coverage?days=${days}`),
   getAlertSummary: () => fetchJson<AlertSummary>(`${BASE_URL}/alerts/summary`),
   updateAlertStatus: (alertId: number, status: string) =>
     fetchJson<SafetyAlert>(`${BASE_URL}/alerts/${alertId}`, { method: 'PATCH', body: JSON.stringify({ status }) }),

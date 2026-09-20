@@ -341,3 +341,65 @@ class TestAnalyticsAPI:
         assert len(data["records"]) == 7
         assert "disclaimer" in data
         assert "network-derived indicator" in data["disclaimer"].lower()
+
+    def test_search_engines_repo(self, orm_session: Session):
+        from backend.app.db import analytics_repo as repo
+
+        data = repo.get_search_engine_activity(orm_session, days=90)
+        by_engine = {e["engine"]: e for e in data["engines"]}
+        # google.com x1 (phone) + youtube.com x2 + wikipedia.org x1 (tablet)
+        assert by_engine["google"]["visits"] == 1
+        assert by_engine["youtube"]["visits"] == 2
+        assert by_engine["wikipedia"]["visits"] == 1
+        assert "facebook" not in by_engine  # not a search engine
+
+    def test_search_engines_device_filter(self, orm_session: Session):
+        from backend.app.db import analytics_repo as repo
+
+        data = repo.get_search_engine_activity(
+            orm_session, device_id="dev_tablet", days=90
+        )
+        by_engine = {e["engine"]: e for e in data["engines"]}
+        assert set(by_engine) == {"youtube", "wikipedia"}
+
+    def test_search_engines_endpoint(self, api_client: TestClient):
+        resp = api_client.get("/api/analytics/search-engines?days=90")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert "keywords_note" in data
+        assert "never" in data["keywords_note"].lower() or "keywords" in data["keywords_note"].lower()
+        assert any(e["engine"] == "youtube" for e in data["engines"])
+        assert all("engine" in v and "occurred_at" in v for v in data["visits"])
+
+    def test_opened_next_topics(self, orm_session: Session):
+        from datetime import datetime, timezone, timedelta
+        from backend.app.db import analytics_repo as repo
+        from backend.app.models.dns import DnsQuery
+
+        now = datetime.now(timezone.utc).replace(microsecond=0)
+        iso = lambda dt: dt.isoformat()
+        orm_session.add_all([
+            DnsQuery(occurred_at=iso(now - timedelta(minutes=30)), source_ip="1.1.1.1",
+                     device_id="dev_phone", domain="www.google.com", query_type="A",
+                     response_status="NOERROR", dns_visibility="FULL"),
+            DnsQuery(occurred_at=iso(now - timedelta(minutes=28)), source_ip="1.1.1.1",
+                     device_id="dev_phone", domain="example-topic.com", query_type="A",
+                     response_status="NOERROR", dns_visibility="FULL"),
+            DnsQuery(occurred_at=iso(now - timedelta(minutes=27)), source_ip="1.1.1.1",
+                     device_id="dev_phone", domain="mail.google.com", query_type="A",
+                     response_status="NOERROR", dns_visibility="FULL"),
+            DnsQuery(occurred_at=iso(now - timedelta(hours=5)), source_ip="1.1.1.1",
+                     device_id="dev_phone", domain="stale-topic.com", query_type="A",
+                     response_status="NOERROR", dns_visibility="FULL"),
+        ])
+        orm_session.commit()
+
+        data = repo.get_search_engine_activity(orm_session, device_id="dev_phone", days=1)
+        google = next(e for e in data["engines"] if e["engine"] == "google")
+        opened = {n["domain"] for n in google["opened_next"]}
+        assert "example-topic.com" in opened
+        # Engine hosts never echo as "opened next", even mid-window…
+        assert "mail.google.com" not in opened
+        assert "www.google.com" not in opened
+        # …and neither do domains outside the 10-minute window.
+        assert "stale-topic.com" not in opened

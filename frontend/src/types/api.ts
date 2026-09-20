@@ -64,15 +64,85 @@ export interface DnsQuery {
   occurred_at: string;
   source_ip: string;
   device_id: string | null;
+  device_name?: string | null;
   domain: string;
   query_type: string;
   response_status: string;
+  resolved_addresses?: string | null;
   dns_visibility: string;
+  category?: string | null;
+  tags?: string[];
+}
+
+export interface QueryTypeCount {
+  query_type: string;
+  count: number;
+}
+
+export interface OpenedNextItem {
+  domain: string;
+  visits: number;
+}
+
+export interface ProxyRequestItem {
+  id: number;
+  occurred_at: string;
+  client_ip: string;
+  device_id: string | null;
+  device_name?: string | null;
+  method: string;
+  scheme: string;
+  host: string;
+  port: number;
+  path?: string | null;
+  full_url: string;
+  user_agent?: string | null;
+  referer?: string | null;
+  req_content_type?: string | null;
+  req_size: number;
+  status_code: number | null;
+  resp_content_type?: string | null;
+  resp_size: number;
+  page_title?: string | null;
+}
+
+export interface ProxySearchItem {
+  id: number;
+  occurred_at: string;
+  device_id: string | null;
+  device_name?: string | null;
+  engine: string;
+  keywords: string;
+  full_url: string;
+}
+
+export interface SearchEngineSummary {
+  engine: string;
+  label: string;
+  visits: number;
+  last_seen: string | null;
+  opened_next?: OpenedNextItem[];
+}
+
+export interface SearchEngineVisit {
+  engine: string;
+  label: string;
+  domain: string;
+  occurred_at: string;
+}
+
+export interface SearchEnginesResponse {
+  disclaimer: string;
+  keywords_note: string;
+  device_id: string | null;
+  engines: SearchEngineSummary[];
+  visits: SearchEngineVisit[];
 }
 
 export interface SafetyAlert {
   id: number;
   device_id: string | null;
+  device_name?: string | null;
   domain: string;
   alert_type: 'UNSAFE_CATEGORY' | 'PHISHING_SUSPICIOUS' | 'BYPASS_ATTEMPT' | 'ANOMALOUS_BURST';
   severity: 'CRITICAL' | 'HIGH' | 'MEDIUM' | 'LOW';

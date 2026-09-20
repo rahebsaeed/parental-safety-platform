@@ -21,6 +21,8 @@ import type {
   CategoryDistributionItem,
   Device,
   HourlyActivityItem,
+  ProxySearchItem,
+  SearchEnginesResponse,
   TimelineItem,
   DomainSecurityResponse,
   DangerousDomain,
@@ -43,7 +45,11 @@ const defaultStartDate = (): string => {
 
 const defaultEndDate = (): string => toLocalDateStr(new Date());
 
-export const AnalyticsPage: React.FC = () => {
+interface Props {
+  onInspectDomain?: (domain: string) => void;
+}
+
+export const AnalyticsPage: React.FC<Props> = ({ onInspectDomain }) => {
   const [devices, setDevices] = useState<Device[]>([]);
   const [selectedDevice, setSelectedDevice] = useState<string>('');
   const [startDate, setStartDate] = useState<string>(defaultStartDate);
@@ -51,7 +57,7 @@ export const AnalyticsPage: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [activeTab, setActiveTab] = useState<'overview' | 'security'>('overview');
+  const [activeTab, setActiveTab] = useState<'overview' | 'security' | 'search'>('overview');
 
   // Analytics states
   const [overview, setOverview] = useState<AnalyticsOverview | null>(null);
@@ -65,6 +71,12 @@ export const AnalyticsPage: React.FC = () => {
   const [dangerousDomains, setDangerousDomains] = useState<DangerousDomain[]>([]);
   const [subjects, setSubjects] = useState<SubjectResponse | null>(null);
   const [aiReady, setAiReady] = useState<boolean | null>(null);
+
+  // Search activity states (per-device search-engine visits)
+  const [searchData, setSearchData] = useState<SearchEnginesResponse | null>(null);
+  const [searchLoading, setSearchLoading] = useState(false);
+  // Exact typed keywords — only exists for devices on the web proxy
+  const [proxySearches, setProxySearches] = useState<ProxySearchItem[]>([]);
 
   // Day-bounded range: a bare "YYYY-MM-DD" end would exclude that whole day
   // under lexicographic ISO comparison, so pin to full local days.
@@ -151,6 +163,34 @@ export const AnalyticsPage: React.FC = () => {
       fetchAiStatus();
     }
   }, [activeTab, fetchDomainSecurity, fetchAiStatus]);
+
+  const fetchSearchEngines = useCallback(async () => {
+    if (!selectedDevice) {
+      setSearchData(null);
+      setProxySearches([]);
+      return;
+    }
+    setSearchLoading(true);
+    try {
+      const [engines, keywords] = await Promise.all([
+        api.getSearchEngines(selectedDevice, 7),
+        api.getProxySearches(selectedDevice, 30).catch(() => [] as ProxySearchItem[]),
+      ]);
+      setSearchData(engines);
+      setProxySearches(keywords);
+    } catch {
+      setSearchData(null);
+      setProxySearches([]);
+    } finally {
+      setSearchLoading(false);
+    }
+  }, [selectedDevice]);
+
+  useEffect(() => {
+    if (activeTab === 'search') {
+      fetchSearchEngines();
+    }
+  }, [activeTab, fetchSearchEngines]);
 
   const maxHourlyCount = Math.max(...hourly.map((h) => h.query_count), 1);
   const maxTimelineCount = Math.max(...timeline.map((t) => t.query_count), 1);
@@ -253,6 +293,13 @@ export const AnalyticsPage: React.FC = () => {
           ) : aiReady === false ? (
             <span className="badge badge-warning" style={{ marginLeft: 6 }}>AI off</span>
           ) : null}
+        </button>
+        <button
+          onClick={() => setActiveTab('search')}
+          className={`btn btn-sm ${activeTab === 'search' ? 'btn-primary' : 'btn-secondary'}`}
+          title="Which search engines each device used (keywords are not visible at DNS layer)"
+        >
+          <Search size={14} /> Search Activity
         </button>
       </div>
 
@@ -687,6 +734,128 @@ export const AnalyticsPage: React.FC = () => {
               </div>
             ))}
           </div>
+        )}
+      </div>
+      </>
+      )}
+
+      {activeTab === 'search' && (
+      <>
+      {/* Search Activity — per-device search-engine visits */}
+      <div className="glass-card" style={{ marginBottom: '1.75rem' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.5rem' }}>
+          <Search size={18} color="var(--primary-light)" />
+          <h2 style={{ fontFamily: 'var(--font-display)', fontSize: '1.125rem', fontWeight: 600 }}>
+            Search Activity{selectedDevice ? ` — ${devices.find((d) => d.device_id === selectedDevice)?.friendly_name || selectedDevice}` : ''}
+          </h2>
+        </div>
+        <p style={{ color: 'var(--text-secondary)', fontSize: '0.8125rem', marginBottom: '1rem' }}>
+          Which search engines this device used, and when. DNS lookups carry
+          hostnames only — never the typed keywords — so search terms stay
+          private by design; what you see is engine usage over time.
+        </p>
+
+        {/* Exact typed keywords — web-proxy devices only */}
+        <div style={{ background: 'rgba(15, 23, 42, 0.4)', borderRadius: 'var(--radius-md)', padding: '0.75rem 0.875rem', marginBottom: '1rem' }}>
+          <div style={{ fontWeight: 600, fontSize: '0.875rem', marginBottom: '0.5rem' }}>
+            Typed search keywords {proxySearches.length > 0 ? `(${proxySearches.length})` : ''}
+          </div>
+          {proxySearches.length === 0 ? (
+            <div style={{ fontSize: '0.8125rem', color: 'var(--text-muted)' }}>
+              No keywords captured — this device is not on the web proxy yet.
+              Open the <strong>Web Requests</strong> tab and follow the 2-minute proxy setup guide.
+            </div>
+          ) : (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
+              {proxySearches.slice(0, 30).map((s) => (
+                <div key={s.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '1rem', padding: '0.375rem 0', borderBottom: '1px solid var(--border-subtle)', fontSize: '0.8125rem' }}>
+                  <div style={{ minWidth: 0 }}>
+                    <span className="badge badge-info" style={{ marginRight: '0.5rem' }}>{s.engine}</span>
+                    <strong>{s.keywords}</strong>
+                  </div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', whiteSpace: 'nowrap' }}>
+                    <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>{new Date(s.occurred_at).toLocaleString()}</span>
+                    {onInspectDomain && (
+                      <button onClick={() => onInspectDomain(new URL(s.full_url).hostname)} className="btn btn-secondary btn-sm" title="Open in Activity log">
+                        Inspect
+                      </button>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+
+        {!selectedDevice ? (
+          <div style={{ textAlign: 'center', padding: '2rem', color: 'var(--text-muted)' }}>
+            Select a child&apos;s device above to see its search-engine activity.
+          </div>
+        ) : searchLoading ? (
+          <div style={{ textAlign: 'center', padding: '2rem', color: 'var(--text-muted)' }}>
+            Loading search activity…
+          </div>
+        ) : !searchData || searchData.engines.length === 0 ? (
+          <div style={{ textAlign: 'center', padding: '2rem', color: 'var(--text-muted)' }}>
+            No search-engine visits in the last 7 days for this device.
+          </div>
+        ) : (
+          <>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem', marginBottom: '1.25rem' }}>
+              {searchData.engines.map((e) => (
+                <div key={e.engine} style={{ background: 'rgba(15, 23, 42, 0.4)', borderRadius: 'var(--radius-md)', padding: '0.625rem 0.875rem' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
+                    <span className="badge badge-info" style={{ fontSize: '0.8125rem', padding: '0.375rem 0.75rem' }}>
+                      {e.label} • {e.visits} visit{e.visits === 1 ? '' : 's'}
+                    </span>
+                    {(e.opened_next ?? []).length > 0 && (
+                      <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>then opened:</span>
+                    )}
+                    {(e.opened_next ?? []).map((n) => (
+                      <button
+                        key={n.domain}
+                        onClick={() => onInspectDomain && onInspectDomain(n.domain)}
+                        className="btn btn-secondary btn-sm"
+                        title={`Opened after searching on ${e.label} — click to inspect in Activity`}
+                        style={{ fontFamily: 'var(--font-mono)', fontSize: '0.75rem' }}
+                      >
+                        {n.domain}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              ))}
+            </div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
+              {searchData.visits.map((v, i) => (
+                <div key={`${v.occurred_at}-${v.domain}-${i}`} style={{
+                  display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+                  padding: '0.5rem 0.75rem', borderBottom: '1px solid var(--border-subtle)', gap: '1rem',
+                }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', minWidth: 0 }}>
+                    <span className="badge badge-muted">{v.label}</span>
+                    <span style={{ fontFamily: 'var(--font-mono)', fontSize: '0.8125rem', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                      {v.domain}
+                    </span>
+                  </div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', whiteSpace: 'nowrap' }}>
+                    <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
+                      {new Date(v.occurred_at).toLocaleString()}
+                    </span>
+                    {onInspectDomain && (
+                      <button
+                        onClick={() => onInspectDomain(v.domain)}
+                        className="btn btn-secondary btn-sm"
+                        title="Open these lookups in the Activity log"
+                      >
+                        Inspect
+                      </button>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </>
         )}
       </div>
       </>

@@ -234,3 +234,49 @@ class TestParserFlush:
         parser.parse_line(_query("A", "example.com", "192.168.1.1"))
         parser.flush()
         assert parser.flush() is None
+
+
+# ── non-address answers (CNAME / MX / SRV / TXT / PTR) ────────────────────────
+
+class TestNonAddressAnswers:
+    def test_cname_target_is_kept(self):
+        entries = parse_lines([
+            _query("CNAME", "alias.example.com", "192.168.1.10"),
+            _reply("alias.example.com", "canonical.example.net"),
+            _query("A", "done.com", "192.168.1.10"),
+        ])
+        assert entries[0].query_type == "CNAME"
+        assert entries[0].resolved_addresses == ["canonical.example.net"]
+
+    def test_mx_exchange_is_kept(self):
+        entries = parse_lines([
+            _query("MX", "example.com", "192.168.1.10"),
+            _reply("example.com", "10 mail.example.com"),
+            _query("A", "done.com", "192.168.1.10"),
+        ])
+        assert entries[0].resolved_addresses == ["10 mail.example.com"]
+
+    def test_txt_with_colon_is_text_not_ipv6(self):
+        entries = parse_lines([
+            _query("TXT", "example.com", "192.168.1.10"),
+            _reply("example.com", "v=spf1 ip4:1.2.3.4 -all"),
+            _query("A", "done.com", "192.168.1.10"),
+        ])
+        assert entries[0].resolved_addresses == ["v=spf1 ip4:1.2.3.4 -all"]
+
+    def test_ipv6_reply_still_recognized(self):
+        entries = parse_lines([
+            _query("AAAA", "example.com", "192.168.1.10"),
+            _reply("example.com", "2606:2800:220:1:248:1893:25c8:1946"),
+            _query("A", "done.com", "192.168.1.10"),
+        ])
+        assert entries[0].resolved_addresses == ["2606:2800:220:1:248:1893:25c8:1946"]
+
+    def test_long_txt_answer_is_truncated(self):
+        long_text = "x" * 400
+        entries = parse_lines([
+            _query("TXT", "example.com", "192.168.1.10"),
+            _reply("example.com", long_text),
+            _query("A", "done.com", "192.168.1.10"),
+        ])
+        assert len(entries[0].resolved_addresses[0]) == 255

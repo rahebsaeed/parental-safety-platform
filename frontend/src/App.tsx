@@ -5,6 +5,7 @@ import { OverviewPage } from './pages/OverviewPage';
 import { DevicesPage } from './pages/DevicesPage';
 import { AlertsPage } from './pages/AlertsPage';
 import { ActivityPage } from './pages/ActivityPage';
+import { WebActivityPage } from './pages/WebActivityPage';
 import { AnalyticsPage } from './pages/AnalyticsPage';
 import { ClassificationsPage } from './pages/ClassificationsPage';
 import { SettingsPage } from './pages/SettingsPage';
@@ -18,6 +19,7 @@ const TAB_METADATA: Record<NavTab, { title: string; subtitle: string }> = {
   devices: { title: 'Device Inventory', subtitle: 'Discovered network nodes, randomized MAC analysis, and hardware profiles' },
   alerts: { title: 'Safety Alerts Console', subtitle: 'Rule-driven explainable warnings with de-duplication and triage' },
   activity: { title: 'DNS Activity Stream', subtitle: 'Filterable network query log with direct vs. relayed visibility indicators' },
+  web: { title: 'Web Requests', subtitle: 'Full request content from devices using this PC as proxy (method, URL, keywords)' },
   analytics: { title: 'Network-Derived Analytics', subtitle: 'Aggregated request distribution and activity periods (Ethically Labeled)' },
   classifications: { title: 'Domain Rules & Categories', subtitle: '11-category classification engine, testing sandbox, and parent overrides' },
   settings: { title: 'Settings', subtitle: 'Account password and platform configuration' },
@@ -32,6 +34,14 @@ export const App: React.FC = () => {
   const [isScanning, setIsScanning] = useState(false);
   const [session, setSession] = useState<SessionInfo | null>(null);
   const [loadingSession, setLoadingSession] = useState(true);
+  // Deep-link a domain filter into the Activity tab (used by the
+  // Analytics search-activity "Inspect" buttons).
+  const [activityDomain, setActivityDomain] = useState('');
+
+  const handleInspectDomain = useCallback((domain: string) => {
+    setActivityDomain(domain);
+    setActiveTab('activity');
+  }, []);
 
   const handleRealtimeEvent = useCallback((event: RealtimeEvent) => {
     if (event.type === 'safety_alert') setActiveAlertsCount((prev) => prev + 1);
@@ -130,8 +140,9 @@ export const App: React.FC = () => {
           {activeTab === 'overview' && <OverviewPage onNavigate={(tab) => setActiveTab(tab as NavTab)} />}
           {activeTab === 'devices' && <DevicesPage onScan={handleScan} scanning={isScanning} />}
           {activeTab === 'alerts' && <AlertsPage />}
-          {activeTab === 'activity' && <ActivityPage />}
-          {activeTab === 'analytics' && <AnalyticsPage />}
+          {activeTab === 'activity' && <ActivityPage initialDomain={activityDomain} />}
+          {activeTab === 'web' && <WebActivityPage />}
+          {activeTab === 'analytics' && <AnalyticsPage onInspectDomain={handleInspectDomain} />}
           {activeTab === 'classifications' && <ClassificationsPage />}
           {activeTab === 'settings' && <SettingsPage />}
         </main>

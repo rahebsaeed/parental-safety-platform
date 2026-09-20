@@ -13,9 +13,14 @@ import {
 } from 'lucide-react';
 import { api } from '../services/api';
 import { useRealtime } from '../hooks/useRealtime';
-import type { Device, DnsQuery, RealtimeEvent } from '../types/api';
+import { RequestInspector } from '../components/RequestInspector';
+import type { Device, DnsQuery, QueryTypeCount, RealtimeEvent } from '../types/api';
 
-export const ActivityPage: React.FC = () => {
+interface Props {
+  initialDomain?: string;
+}
+
+export const ActivityPage: React.FC<Props> = ({ initialDomain }) => {
   const [queryList, setQueries] = useState<DnsQuery[]>([]);
   const [devices, setDevices] = useState<Device[]>([]);
   const [loading, setLoading] = useState(true);
@@ -27,6 +32,9 @@ export const ActivityPage: React.FC = () => {
   const [selectedDevice, setSelectedDevice] = useState<string>('');
   const [selectedVisibility, setSelectedVisibility] = useState<string>('');
   const [selectedStatus, setSelectedStatus] = useState<string>('');
+  const [selectedType, setSelectedType] = useState<string>('');
+  const [queryTypes, setQueryTypes] = useState<QueryTypeCount[]>([]);
+  const [inspected, setInspected] = useState<DnsQuery | null>(null);
   const [limit, setLimit] = useState(50);
   const [offset, setOffset] = useState(0);
 
@@ -36,6 +44,14 @@ export const ActivityPage: React.FC = () => {
       setDevices(data);
     } catch {
       // Non-blocking device list fetch
+    }
+  };
+
+  const fetchQueryTypes = async () => {
+    try {
+      setQueryTypes(await api.getQueryTypes());
+    } catch {
+      // Non-blocking type list fetch
     }
   };
 
@@ -52,6 +68,7 @@ export const ActivityPage: React.FC = () => {
         device_id: selectedDevice || undefined,
         visibility: selectedVisibility || undefined,
         status: selectedStatus || undefined,
+        query_type: selectedType || undefined,
         limit,
         offset,
       });
@@ -62,11 +79,21 @@ export const ActivityPage: React.FC = () => {
       setLoading(false);
       setRefreshing(false);
     }
-  }, [searchDomain, selectedDevice, selectedVisibility, selectedStatus, limit, offset]);
+  }, [searchDomain, selectedDevice, selectedVisibility, selectedStatus, selectedType, limit, offset]);
 
   useEffect(() => {
     fetchDevices();
+    fetchQueryTypes();
   }, []);
+
+  // Deep-link support: pre-fill the domain filter (e.g. from Analytics).
+  useEffect(() => {
+    if (initialDomain) {
+      setSearchDomain(initialDomain);
+      setOffset(0);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [initialDomain]);
 
   useEffect(() => {
     fetchQueries();
@@ -81,11 +108,12 @@ export const ActivityPage: React.FC = () => {
         if (searchDomain && !newQuery.domain.toLowerCase().includes(searchDomain.toLowerCase())) return;
         if (selectedVisibility && newQuery.dns_visibility !== selectedVisibility) return;
         if (selectedStatus && newQuery.response_status !== selectedStatus) return;
+        if (selectedType && newQuery.query_type !== selectedType) return;
 
         setQueries((prev) => [newQuery, ...(Array.isArray(prev) ? prev.slice(0, limit - 1) : [])]);
       }
     },
-    [offset, selectedDevice, searchDomain, selectedVisibility, selectedStatus, limit]
+    [offset, selectedDevice, searchDomain, selectedVisibility, selectedStatus, selectedType, limit]
   );
 
   useRealtime({ onEvent: handleRealtime });
@@ -124,6 +152,25 @@ export const ActivityPage: React.FC = () => {
       default:
         return <span className="badge badge-muted">{status}</span>;
     }
+  };
+
+  const getTypeBadge = (queryType: string) => {
+    const t = (queryType || '').toUpperCase();
+    const cls =
+      t === 'A' || t === 'AAAA'
+        ? 'badge-success'
+        : t === 'HTTPS' || t === 'SVCB'
+        ? 'badge-info'
+        : t === 'MX' || t === 'TXT' || t === 'CNAME'
+        ? 'badge-warning'
+        : t === 'PTR' || t === 'SRV' || t === 'NS' || t === 'SOA'
+        ? 'badge-info'
+        : 'badge-muted';
+    return (
+      <span className={`badge ${cls}`} style={{ fontFamily: 'var(--font-mono)' }} title="DNS query type — click the row to inspect">
+        {queryType}
+      </span>
+    );
   };
 
   const getVisibilityBadge = (visibility: string) => {
@@ -221,6 +268,26 @@ export const ActivityPage: React.FC = () => {
               </select>
             </div>
 
+            {/* DNS Type Filter */}
+            <div style={{ flex: '1 1 130px' }}>
+              <select
+                className="form-select"
+                value={selectedType}
+                onChange={(e) => {
+                  setSelectedType(e.target.value);
+                  setOffset(0);
+                }}
+                title="Filter by DNS query type (A, AAAA, HTTPS, MX, TXT, …)"
+              >
+                <option value="">All Types</option>
+                {queryTypes.map((t) => (
+                  <option key={t.query_type} value={t.query_type}>
+                    {t.query_type} ({t.count})
+                  </option>
+                ))}
+              </select>
+            </div>
+
             {/* Action Buttons */}
             <div style={{ display: 'flex', gap: '0.5rem' }}>
               <button type="submit" className="btn btn-primary btn-sm">
@@ -249,34 +316,35 @@ export const ActivityPage: React.FC = () => {
 
       <div className="table-container">
         <table className="data-table">
-          <thead>
-            <tr>
-              <th>Timestamp</th>
-              <th>Device</th>
-              <th>Source IP</th>
-              <th>Domain</th>
-              <th>Type</th>
-              <th>Status</th>
-              <th>Visibility</th>
-            </tr>
-          </thead>
-          <tbody>
-            {loading ? (
+            <thead>
               <tr>
-                <td colSpan={7} style={{ textAlign: 'center', padding: '3rem', color: 'var(--text-muted)' }}>
-                  Loading DNS query activity...
-                </td>
+                <th>Timestamp</th>
+                <th>Device</th>
+                <th>Source IP</th>
+                <th>Domain</th>
+                <th>Type</th>
+                <th>Tags</th>
+                <th>Status</th>
+                <th>Visibility</th>
               </tr>
-            ) : queryList.length === 0 ? (
-              <tr>
-                <td colSpan={7} style={{ textAlign: 'center', padding: '3rem', color: 'var(--text-muted)' }}>
-                  <Radio size={32} style={{ marginBottom: '0.75rem', opacity: 0.5 }} />
-                  <div>No DNS queries matching current criteria.</div>
-                </td>
-              </tr>
-            ) : (
-              queryList.map((q) => (
-                <tr key={q.id}>
+            </thead>
+            <tbody>
+              {loading ? (
+                <tr>
+                  <td colSpan={8} style={{ textAlign: 'center', padding: '3rem', color: 'var(--text-muted)' }}>
+                    Loading DNS query activity...
+                  </td>
+                </tr>
+              ) : queryList.length === 0 ? (
+                <tr>
+                  <td colSpan={8} style={{ textAlign: 'center', padding: '3rem', color: 'var(--text-muted)' }}>
+                    <Radio size={32} style={{ marginBottom: '0.75rem', opacity: 0.5 }} />
+                    <div>No DNS queries matching current criteria.</div>
+                  </td>
+                </tr>
+              ) : (
+                queryList.map((q) => (
+                  <tr key={q.id} onClick={() => setInspected(q)} style={{ cursor: 'pointer' }} title="Click to inspect this request">
                   <td style={{ whiteSpace: 'nowrap', fontFamily: 'var(--font-mono)', fontSize: '0.8125rem' }}>
                     {new Date(q.occurred_at).toLocaleString()}
                   </td>
@@ -295,19 +363,34 @@ export const ActivityPage: React.FC = () => {
                       <span style={{ fontFamily: 'var(--font-mono)', fontWeight: 500 }}>{q.domain}</span>
                     </div>
                   </td>
-                  <td>
-                    <span className="badge badge-muted" style={{ fontFamily: 'var(--font-mono)' }}>
-                      {q.query_type}
-                    </span>
-                  </td>
-                  <td>{getStatusBadge(q.response_status)}</td>
-                  <td>{getVisibilityBadge(q.dns_visibility)}</td>
-                </tr>
-              ))
-            )}
-          </tbody>
-        </table>
-      </div>
+                    <td>{getTypeBadge(q.query_type)}</td>
+                    <td>
+                      {(q.tags ?? []).length > 0 ? (
+                        <span style={{ display: 'inline-flex', gap: '0.25rem', flexWrap: 'wrap' }}>
+                          {(q.tags ?? []).map((t) => (
+                            <span key={t} className="badge badge-warning" style={{ fontSize: '0.7rem' }}>
+                              {t}
+                            </span>
+                          ))}
+                        </span>
+                      ) : (
+                        <span style={{ color: 'var(--text-muted)' }}>—</span>
+                      )}
+                    </td>
+                    <td>{getStatusBadge(q.response_status)}</td>
+                    <td>{getVisibilityBadge(q.dns_visibility)}</td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </table>
+        </div>
+
+        <RequestInspector
+          record={inspected}
+          deviceLabel={getDeviceLabel}
+          onClose={() => setInspected(null)}
+        />
 
       {/* Pagination Footer */}
       <div

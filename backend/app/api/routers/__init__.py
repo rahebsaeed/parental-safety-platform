@@ -10,11 +10,12 @@ from .realtime import router as realtime_router
 from .auth import router as auth_router
 from .router_dns import router as router_dns_router
 from .openrouter import router as openrouter_router
+from .proxy import router as proxy_router
 
 __all__ = [
     "health_router", "devices_router", "activity_router",
     "domains_router", "domain_security_router",
     "classification_router", "alerts_router",
     "analytics_router", "realtime_router", "auth_router",
-    "router_dns_router", "openrouter_router",
+    "router_dns_router", "openrouter_router", "proxy_router",
 ]

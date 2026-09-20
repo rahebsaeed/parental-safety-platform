@@ -6,6 +6,7 @@ from datetime import datetime, timezone
 from typing import Optional
 from pathlib import Path
 
+from backend.app.classifiers.traffic_tags import tags_for_domain
 from backend.app.core.config import settings
 from backend.app.schemas.devices import (
     DeviceSummary,
@@ -366,7 +367,9 @@ class Repository:
         count_sql = f"SELECT COUNT(*) FROM dns_queries q {where_sql};"
         total = conn.execute(count_sql, params).fetchone()[0]
 
-        # Paginated items query
+        # Paginated items query (one LEFT JOIN keeps stored category
+        # per row with no N+1 lookups; observable tags are derived in
+        # Python from the domain alone).
         items_sql = f"""
             SELECT
                 q.id,
@@ -378,9 +381,11 @@ class Repository:
                 q.query_type,
                 q.response_status,
                 q.resolved_addresses,
-                q.dns_visibility
+                q.dns_visibility,
+                dc.category AS category
             FROM dns_queries q
             LEFT JOIN devices d ON d.device_id = q.device_id
+            LEFT JOIN domain_classifications dc ON dc.domain = q.domain
             {where_sql}
             ORDER BY q.occurred_at DESC, q.id DESC
             LIMIT ? OFFSET ?;
@@ -400,11 +405,22 @@ class Repository:
                 response_status=r["response_status"],
                 resolved_addresses=r["resolved_addresses"],
                 dns_visibility=r["dns_visibility"],
+                category=r["category"] if "category" in r.keys() else None,
+                tags=tags_for_domain(r["domain"]),
             )
             for r in rows
         ]
 
         return total, items
+
+    @staticmethod
+    def query_type_counts(conn: sqlite3.Connection) -> list[dict]:
+        """Distinct DNS query types observed with counts (for UI filters)."""
+        rows = conn.execute(
+            "SELECT query_type, COUNT(*) AS n FROM dns_queries"
+            " GROUP BY query_type ORDER BY n DESC;"
+        ).fetchall()
+        return [{"query_type": r["query_type"], "count": r["n"]} for r in rows]
 
     # ── Top Domains & Stats ───────────────────────────────────────────────────
 

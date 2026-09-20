@@ -26,7 +26,7 @@ NGINX_SITES_ENABLED="/etc/nginx/sites-enabled"
 NGINX_CONF_NAME="parental-monitor"
 
 SYSTEMD_DIR="/etc/systemd/system"
-SERVICES=(parental-monitor-collector parental-monitor-api dnsmasq)
+SERVICES=(parental-monitor-collector parental-monitor-api dnsmasq parental-monitor-proxy)
 
 # ---------------------------------------------------------------------------
 log() { echo -e "\e[1;34m[install]\e[0m $*"; }
@@ -234,7 +234,25 @@ if [[ -f /etc/systemd/resolved.conf ]]; then
     fi
 fi
 
-# 10b. dnsmasq config -------------------------------------------------------
+# 10b. Parental CA for the explicit web proxy --------------------------------
+# Content observation needs a CA the supervised devices trust. Generated
+# once (kept on re-runs); the private key never leaves /opt.
+log "Setting up parental proxy CA..."
+if [[ -f "$PROJECT_ROOT/infrastructure/proxy/setup-ca.sh" ]]; then
+    bash "$PROJECT_ROOT/infrastructure/proxy/setup-ca.sh" /opt/parental-safety/proxy/ca
+    ok "Parental CA ready"
+else
+    warn "setup-ca.sh not found — proxy content observation disabled until it runs"
+fi
+# Proxy exclusion list (YAML — the unit loads it from the confdir).
+if [[ -f "$PROJECT_ROOT/infrastructure/proxy/config.yaml" ]]; then
+    cp "$PROJECT_ROOT/infrastructure/proxy/config.yaml" /opt/parental-safety/proxy/ca/config.yaml
+    chown "$SERVICE_USER:$SERVICE_GROUP" /opt/parental-safety/proxy/ca/config.yaml
+    chmod 644 /opt/parental-safety/proxy/ca/config.yaml
+    ok "Proxy exclusion list deployed"
+fi
+
+# 10c. dnsmasq config -------------------------------------------------------
 # The forwarder MUST bind 192.168.1.20 only (see the conf header: wildcard
 # binds collide with LXD/Tailscale :53 holders). install.sh used to skip
 # this file entirely, which once left an empty conf behind → wildcard bind

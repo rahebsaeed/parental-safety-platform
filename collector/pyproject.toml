@@ -8,9 +8,18 @@ version = "0.2.0"
 description = "Phase 1 + 2: LAN device discovery and DNS observation collector for the parental safety platform"
 requires-python = ">=3.10"
 readme = "README.md"
+# NOTE: anyio/typing-extensions are pinned exactly, not loosely. mitmproxy
+# 12.x requires typing-extensions<=4.14 while current anyio/first-party
+# pins pull >=4.15 (anyio>=4.10 imports `sentinel`, which does not exist
+# below 4.15) — a loose resolve installs a combination where either the
+# API (fastapi→anyio) or the proxy (mitmproxy) fails at import. anyio 4.9
+# is the newest line happy with typing-extensions 4.14 (verified live).
 dependencies = [
     "scapy>=2.5.0",
     "requests>=2.31.0",
+    "mitmproxy>=11",
+    "anyio>=4.6,<4.10",
+    "typing-extensions>=4.13.2,<=4.14",
 ]
 
 [project.optional-dependencies]

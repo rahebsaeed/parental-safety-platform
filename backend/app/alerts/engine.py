@@ -8,7 +8,9 @@ from typing import Optional
 
 from backend.app.alerts.rules import (
     check_bypass_attempt,
+    check_explicit_keywords,
     check_phishing_suspicious,
+    check_tunnel_endpoint,
     check_unsafe_category,
 )
 from backend.app.alerts.types import DetectionResult
@@ -24,8 +26,10 @@ def evaluate(
     """Evaluate a domain across all safety vectors in priority order.
 
     1. Unsafe categories (Adult Content, Gambling) — highest priority.
-    2. Phishing / credential theft patterns.
-    3. Bypass / Encrypted DNS probing.
+    2. Explicit adult/gambling wording (fires even for unclassified domains).
+    3. Phishing / credential theft patterns.
+    4. Bypass / Encrypted DNS probing.
+    5. VPN / Tor / proxy tunnel endpoints.
 
     Returns the first matching :class:`DetectionResult`, or None if benign.
     """
@@ -37,13 +41,23 @@ def evaluate(
     if result:
         return result
 
-    # 2. Phishing / deceptive pattern check
+    # 2. Explicit wording safety net (category-independent)
+    result = check_explicit_keywords(domain)
+    if result:
+        return result
+
+    # 3. Phishing / deceptive pattern check
     result = check_phishing_suspicious(domain)
     if result:
         return result
 
-    # 3. Encrypted DNS / DoH / visibility bypass check
+    # 4. Encrypted DNS / DoH / visibility bypass check
     result = check_bypass_attempt(domain, dns_visibility=dns_visibility)
+    if result:
+        return result
+
+    # 5. VPN / Tor / proxy tunnel endpoints
+    result = check_tunnel_endpoint(domain)
     if result:
         return result
 

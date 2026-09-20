@@ -479,4 +479,33 @@ hypothetical ones.
 | 2026-09-18 | Only 2 of 8 devices' DNS visible despite router DNS = `.20` | 24h DHCP leases: devices keep the old DNS until lease renewal; only reconnected hosts (this PC, one phone) used the new forwarder | Reboot the router once so every device re-DHCPS and picks up `.20` within ~2 min (per-device WiFi toggle works too, slower) | After any router-DNS switch, propagation is the bottleneck — a 1-day lease means up to a day of partial visibility without a reboot |
 | 2026-09-18 | 3h failsafe deadline never written (`Read-only file system`) | API unit's `ProtectSystem=strict` lacked `ReadWritePaths` for `/var/lib/parental-safety`; failure was silent (warning only) | Added the path to `parental-monitor-api.service`; deadline now written + verified | Every state file a hardened service writes needs an explicit `ReadWritePaths`; silent-degrade paths must be verified live, not just logged |
 | 2026-09-18 | Only 2/8 devices visible after DNS switch; reboot-per-switch demanded | 24h DHCP lease: clients keep old DNS until renewal (up to a day) | `router-dns.sh` now enforces a 600s lease on every switch (renew ~5 min); one final reboot activates it, then all future switches propagate in minutes, and outage recovery shortens too | DHCP lease time is the propagation speed limit — set it short once, never reboot per change again |
+| 2026-09-19 | Risky domains labeled Safe; alerts showed raw `dev_xx` IDs | `_SAFE_KEYWORDS` substring-matched generic tokens (`cdn`, `api`, `cloud`…); short tokens (`bet`, `tor`) matched inside ordinary words; alerts never joined the device name | SAFE now only on exact/suffix known-safe roots (else honest UNKNOWN); short tokens need word boundaries; new vectors: 28 DoH endpoints, VPN/Tor tunnel detection, category-independent adult/gambling keywords, 10 more phishing lures (delivery smishing, punycode lookalikes); alerts carry `device_name` everywhere incl. realtime | Safe-by-default must be earned by exact match; detection must not depend on the domain being classified first |
+| 2026-09-19 | Full request-type logging + inspector + search keywords requested | DNS telemetry carries hostnames/types/answers only — no URLs, methods, headers, bodies, cookies, ports, or `?q=` strings exist at this layer | Shipped the honest subset: all observed DNS types stored incl. CNAME/MX/TXT answers; observable tags (DoH/VPN/Tor/SafeSearch) + stored category on every record; DNS-record inspector drawer (dig/JSON/domain copy, related alerts, explicit no-payload boundary note); per-device search-engine *visits* view with keywords-not-visible disclaimer | Never fake unobservable fields — label inference as inference, absence as absence |
+| 2026-09-19 | Inspector copy buttons dead; Brave search invisible; "what did they search?" | Clipboard API needs secure context (dashboard is plain LAN HTTP); Brave missing from engine list; keywords never in DNS | Textarea copy fallback (+failed state); 15 engines incl. Brave/Ecosia/Startpage/Yandex; "opened next" topics (top domains in the 10 min after each search visit) as the DNS-visible proxy for search intent | Fix the bug, extend the list, and answer the intent behind the request with data that actually exists |
+
+## Phase 19 — Explicit Web Proxy (content observation) ✅ Complete (2026-09-19)
+
+DNS can never show URLs, keywords, or headers — so an opt-in explicit
+proxy (`parental-monitor-proxy`, mitmproxy on `192.168.1.20:8080`) now
+provides them for supervised devices only (per-device WiFi proxy setting
++ parental CA install; banking/Apple pass through undecrypted). Hard
+boundary: Cookie/Authorization headers and bodies are never stored —
+only metadata, page titles, and search keywords (`proxy_requests` +
+`proxy_search_terms`, migration 0005). Dashboard gains a Web Requests
+page (real cURL/JSON copy), typed keywords inside Analytics → Search,
+and a CA download + setup guide. Verified live: Google/Brave searches
+intercepted with keywords attributed (`dev_08`), Apple excluded. Gotcha
+fixed along the way: `--set ignore_hosts` with a broken value silently
+disables ALL interception — exclusions live in `confdir/config.yaml`;
+dependency square pinned (`anyio<4.10`, `typing-extensions<=4.14`).
+
+Automatic proxy/CA enrollment is impossible and will stay so: (1) this
+router's DHCP exposes no custom options (only option-60 vendor ID —
+verified on the Network page), so no WPAD/PAC URL can be pushed, and
+modern phones ignore WPAD anyway; (2) every OS requires explicit user
+consent to trust a root CA — silent install is an anti-malware guarantee,
+not a missing feature. Instead, `GET /api/proxy/coverage` plus the
+Web-tab Supervised/DNS-only badges show per-device enrollment, so an
+unenrolled phone is visible with its 2-minute setup one click away.
 | 2026-09-14 | `L.map`/`w.map`/`q.map is not a function` console errors | Misdiagnosed as minifier bug twice (renames, terser) — actually `GET /api/activity` returns `{items:[...]}` and callers mapped the envelope object | Unwrap `.items` in `api.getActivity` + `Array.isArray` guards | API doc now states paginated shape explicitly; verify with Network tab, not bundle archaeology |
+| 2026-09-19 | Browser test showed nothing; router-admin rows flooding Web Requests | Brave ran 2+ days predating the proxy setup (old processes keep direct route); router UI polling logged as content | Chromium picks up GNOME proxy live (no restart needed) — traffic flowing; `hide_local` (default on, `hide_local=false` to audit) hides router/self/loopback | Old browser processes predate proxy settings — verify routing before blaming capture |

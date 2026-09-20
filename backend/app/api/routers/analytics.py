@@ -27,6 +27,9 @@ from backend.app.schemas.analytics import (
     ExportRecordItem,
     HourlyActivityItem,
     HourlyActivityResponse,
+    SearchEngineSummary,
+    SearchEngineVisit,
+    SearchEnginesResponse,
     TimelineItem,
     TimelineResponse,
 )
@@ -120,6 +123,29 @@ def get_activity_timeline(
     return TimelineResponse(
         device_id=device_id,
         timeline=items,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Search Engine Activity (domain-level visits)
+# ---------------------------------------------------------------------------
+
+@router.get("/search-engines", response_model=SearchEnginesResponse)
+def get_search_engines(
+    device_id: Optional[str] = Query(None, description="Filter by device ID (per-child view)"),
+    days: int = Query(7, ge=1, le=90, description="Lookback window in days"),
+    session: Session = Depends(get_session),
+) -> SearchEnginesResponse:
+    """Which search engines were used, and when.
+
+    DNS carries hostnames only — never the typed keywords — so this
+    reports engine visits (counts + timestamps), not search terms.
+    """
+    data = repo.get_search_engine_activity(session, device_id=device_id, days=days)
+    return SearchEnginesResponse(
+        device_id=device_id,
+        engines=[SearchEngineSummary(**e) for e in data["engines"]],
+        visits=[SearchEngineVisit(**v) for v in data["visits"]],
     )
 
 

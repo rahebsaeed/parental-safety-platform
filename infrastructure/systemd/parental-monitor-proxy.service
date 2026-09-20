@@ -1,0 +1,42 @@
+[Unit]
+Description=Parental Safety Platform — Explicit Web Proxy (content observation)
+Documentation=https://github.com/local/parental-safety-platform
+# Explicit (not transparent) proxy: only devices whose WiFi proxy points
+# here AND trust the parental CA are observed. Everyone else stays
+# DNS-only. Banking/Apple hosts pass through undecrypted (ignore_hosts).
+After=network-online.target parental-monitor-api.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=parental-monitor
+Group=parental-monitor
+WorkingDirectory=/opt/parental-safety
+
+# NOTE: never pass ignore_hosts via --set on the command line — a
+# misparsed value silently disables ALL interception. The exclusion list
+# lives in confdir/config.yaml (proper YAML list), deployed by install.sh.
+ExecStart=/opt/parental-safety/collector/.venv/bin/mitmdump \
+    --listen-host 192.168.1.20 \
+    --listen-port 8080 \
+    --set confdir=/opt/parental-safety/proxy/ca \
+    -s /opt/parental-safety/collector/proxy/addon.py \
+    -q
+
+Restart=always
+RestartSec=5s
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=parental-monitor-proxy
+
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+ReadWritePaths=/opt/parental-safety/collector/data /opt/parental-safety/proxy
+Environment=PROXY_DB_PATH=/opt/parental-safety/collector/data/discovery.sqlite3
+Environment=PYTHONPATH=/opt/parental-safety
+EnvironmentFile=-/opt/parental-safety/.env
+
+[Install]
+WantedBy=multi-user.target

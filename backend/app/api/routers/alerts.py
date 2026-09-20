@@ -20,6 +20,7 @@ from backend.app.core.auth import get_client_ip
 from backend.app.db import alert_repo as repo
 from backend.app.db.session import get_session
 from backend.app.models.audit import AuditLog
+from backend.app.models.device import Device
 from backend.app.schemas.alert import (
     AlertSummaryResponse,
     SafetyAlertRead,
@@ -28,6 +29,26 @@ from backend.app.schemas.alert import (
 )
 
 router = APIRouter(prefix="/alerts", tags=["Safety Alerts"])
+
+
+def _device_names(session: Session) -> dict[str, str]:
+    """Map device_id → display name (friendly name, else the raw ID).
+
+    One query per request keeps alert payloads showing "nasseem phone"
+    instead of "dev_07" without N+1 lookups.
+    """
+    names: dict[str, str] = {}
+    for device_id, friendly_name in session.query(Device.device_id, Device.friendly_name).all():
+        names[device_id] = friendly_name or device_id
+    return names
+
+
+def _read_alert(alert, names: dict[str, str]) -> SafetyAlertRead:
+    payload = SafetyAlertRead.model_validate(alert)
+    payload.device_name = names.get(alert.device_id or "", None)
+    if payload.device_name is None and alert.device_id:
+        payload.device_name = alert.device_id
+    return payload
 
 
 # ---------------------------------------------------------------------------
@@ -39,6 +60,7 @@ def list_alerts(
     status: Optional[str] = Query(None, description="Filter by status: ACTIVE, ACKNOWLEDGED, DISMISSED, RESOLVED"),
     severity: Optional[str] = Query(None, description="Filter by severity: CRITICAL, HIGH, MEDIUM, LOW"),
     device_id: Optional[str] = Query(None, description="Filter by device ID"),
+    domain: Optional[str] = Query(None, description="Filter by exact domain (used by the activity inspector)"),
     limit: int = Query(50, ge=1, le=500),
     offset: int = Query(0, ge=0),
     session: Session = Depends(get_session),
@@ -49,10 +71,12 @@ def list_alerts(
         status=status,
         severity=severity,
         device_id=device_id,
+        domain=domain,
         limit=limit,
         offset=offset,
     )
-    return [SafetyAlertRead.model_validate(r) for r in rows]
+    names = _device_names(session)
+    return [_read_alert(r, names) for r in rows]
 
 
 # ---------------------------------------------------------------------------
@@ -121,7 +145,7 @@ def get_alert_detail(
     alert = repo.get_alert(session, alert_id)
     if not alert:
         raise HTTPException(status_code=404, detail=f"Alert {alert_id} not found")
-    return SafetyAlertRead.model_validate(alert)
+    return _read_alert(alert, _device_names(session))
 
 
 # ---------------------------------------------------------------------------
@@ -161,4 +185,4 @@ def update_alert(
 
     session.commit()
     session.refresh(alert)
-    return SafetyAlertRead.model_validate(alert)
+    return _read_alert(alert, _device_names(session))

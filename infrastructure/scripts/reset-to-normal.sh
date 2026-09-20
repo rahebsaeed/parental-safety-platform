@@ -106,6 +106,7 @@ fi
 # -- Step 1: stop/disable/remove systemd units -------------------------------
 log "Step 1 — platform systemd units and timers..."
 UNITS=(parental-monitor-collector.service parental-monitor-api.service
+       parental-monitor-proxy.service
        parental-monitor-scan.service parental-monitor-scan.timer
        parental-monitor-ai-sync.service parental-monitor-ai-sync.timer
        parental-monitor-dns-revert.service parental-monitor-dns-revert.timer

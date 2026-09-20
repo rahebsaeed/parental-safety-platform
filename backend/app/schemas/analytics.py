@@ -56,6 +56,38 @@ class AnalyticsOverviewResponse(BaseModel):
     top_category: str
 
 
+class OpenedNextItem(BaseModel):
+    domain: str
+    visits: int
+
+
+class SearchEngineSummary(BaseModel):
+    engine: str
+    label: str
+    visits: int
+    last_seen: Optional[str] = None
+    opened_next: list[OpenedNextItem] = []
+
+
+class SearchEngineVisit(BaseModel):
+    engine: str
+    label: str
+    domain: str
+    occurred_at: str
+
+
+class SearchEnginesResponse(BaseModel):
+    disclaimer: str = NETWORK_INDICATOR_DISCLAIMER
+    keywords_note: str = (
+        "DNS lookups carry hostnames only — never the /search?q=... path. "
+        "This view shows which search engines were used and when; "
+        "the typed keywords are not visible at the DNS layer."
+    )
+    device_id: Optional[str] = None
+    engines: list[SearchEngineSummary]
+    visits: list[SearchEngineVisit]
+
+
 class ExportRecordItem(BaseModel):
     id: int
     occurred_at: str

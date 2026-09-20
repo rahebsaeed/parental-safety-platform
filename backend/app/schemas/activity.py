@@ -15,6 +15,8 @@ class DnsQueryItem(BaseModel):
     response_status: str
     resolved_addresses: Optional[str] = None
     dns_visibility: str
+    category: Optional[str] = None
+    tags: list[str] = Field(default_factory=list)
 
 
 class PaginatedActivityResponse(BaseModel):

@@ -403,3 +403,196 @@ class TestAlertsAPI:
         assert "by_severity" in data
         assert "by_type" in data
         assert data["total_alerts"] >= 3
+
+
+# ---------------------------------------------------------------------------
+# Extended detection vectors (DoH, tunnels, explicit keywords, phishing)
+# ---------------------------------------------------------------------------
+
+class TestExtendedVectors:
+    def test_explicit_adult_keyword_fires_without_category(self):
+        res = evaluate("freexxxmovies.test", category="UNCATEGORIZED")
+        assert res is not None
+        assert res.severity == AlertSeverity.CRITICAL
+        assert res.rule_matched.startswith("KEYWORD:ADULT_EXPLICIT")
+
+    def test_explicit_gambling_keyword_fires_without_category(self):
+        res = evaluate("melbet-online.test", category="UNCATEGORIZED")
+        assert res is not None
+        assert res.severity == AlertSeverity.HIGH
+        assert res.rule_matched.startswith("KEYWORD:GAMBLING")
+
+    def test_bet_full_label_fires(self):
+        res = evaluate("super.bet", category="UNCATEGORIZED")
+        assert res is not None
+        assert res.severity == AlertSeverity.HIGH
+
+    def test_word_boundaries_avoid_false_positives(self):
+        # Family names, places and ordinary words must never fire.
+        for benign in (
+            "alphabet.test",
+            "sussex-records.test",
+            "essex.test",
+            "sexton.test",
+            "milford.test",
+            "escorted-tours.test",
+            "vector.test",
+            "history.test",
+            "monitor.test",
+            "mistakes.test",
+            "stackoverflow.test",
+        ):
+            assert evaluate(benign, category="UNCATEGORIZED") is None, benign
+
+    def test_glued_explicit_compounds_fire(self):
+        # "freexxxmovies" hides "xxx" mid-word — still explicit, must fire.
+        for domain in ("freexxxmovies.test", "freeporn.test", "teenporn.test"):
+            res = evaluate(domain, category="UNCATEGORIZED")
+            assert res is not None, domain
+            assert res.severity == AlertSeverity.CRITICAL
+
+    def test_extended_doh_endpoints(self):
+        for domain in (
+            "dns10.quad9.net",
+            "security.cloudflare-dns.com",
+            "use-application-dns.net",
+            "doh.dns.sb",
+        ):
+            res = evaluate(domain, category="TECH_INFRASTRUCTURE")
+            assert res is not None, domain
+            assert res.alert_type == AlertType.BYPASS_ATTEMPT
+            assert res.rule_matched == "RESOLVER:KNOWN_DOH_ENDPOINT"
+
+    def test_vpn_endpoint(self):
+        res = evaluate("us1.nordvpn.com", category="TECH_INFRASTRUCTURE")
+        assert res is not None
+        assert res.alert_type == AlertType.BYPASS_ATTEMPT
+        assert res.severity == AlertSeverity.MEDIUM
+        assert res.rule_matched.startswith("TUNNEL:VPN")
+
+    def test_vpn_suffix_discipline(self):
+        # "us-nordvpn.com" is NOT a subdomain of nordvpn.com — no alert.
+        assert evaluate("us-nordvpn.com", category="TECH_INFRASTRUCTURE") is None
+
+    def test_tor_endpoint_is_high(self):
+        res = evaluate("x.torproject.org", category="TECH_INFRASTRUCTURE")
+        assert res is not None
+        assert res.severity == AlertSeverity.HIGH
+        assert res.rule_matched.startswith("TUNNEL:TOR")
+
+    def test_extended_phishing_lures(self):
+        for domain in (
+            "microsoft-verify-login.test",
+            "amazon-order-suspended.test",
+            "facebook-copyright-appeal.test",
+            "aramex-pay-customs-fee.test",
+            "binance-wallet-verify.test",
+            "apple-bill-invoice.test",
+            "xn--paypa1-login.test",
+        ):
+            res = evaluate(domain, category="UNCATEGORIZED")
+            assert res is not None, domain
+            assert res.alert_type == AlertType.PHISHING_SUSPICIOUS
+            assert res.severity == AlertSeverity.HIGH
+
+
+class TestDomainSecurityDiscipline:
+    def test_generic_infra_words_are_not_safe(self):
+        from backend.app.classifiers.domain_security import (
+            SecurityLevel,
+            classify_domain,
+        )
+
+        for domain in (
+            "evil-api-cloud-shop.test",
+            "malicious-news-tracker.test",
+            "phish-music-store.test",
+            "opencode.ai",
+            "main.vscode-cdn.net",
+        ):
+            assert classify_domain(domain).security_level != SecurityLevel.SAFE, domain
+
+    def test_known_safe_roots_still_safe(self):
+        from backend.app.classifiers.domain_security import (
+            SecurityLevel,
+            classify_domain,
+        )
+
+        for domain in ("mail.google.com", "www.youtube.com", "github.com"):
+            assert classify_domain(domain).security_level == SecurityLevel.SAFE, domain
+
+    def test_short_tokens_need_boundaries(self):
+        from backend.app.classifiers.domain_security import (
+            SecurityLevel,
+            classify_domain,
+        )
+
+        for domain in ("alphabet.test", "vector.test", "history.test", "monitor.test"):
+            level = classify_domain(domain).security_level
+            assert level not in (SecurityLevel.DANGEROUS, SecurityLevel.RISKY), domain
+
+
+def test_alerts_carry_device_name(client: TestClient, test_db) -> None:
+    """Alerts show the friendly device name, never a bare dev_xx ID."""
+    # The shared API fixture schema has no safety_alerts table — create it
+    # here (mirrors backend.app.models.alert.SafetyAlert) so this test is
+    # self-contained and touches no shared fixture.
+    test_db.execute(
+        "CREATE TABLE IF NOT EXISTS safety_alerts ("
+        " id INTEGER PRIMARY KEY AUTOINCREMENT,"
+        " device_id TEXT, domain TEXT NOT NULL, alert_type TEXT NOT NULL,"
+        " severity TEXT NOT NULL DEFAULT 'MEDIUM', title TEXT NOT NULL,"
+        " description TEXT NOT NULL, rule_matched TEXT NOT NULL,"
+        " explanation TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'ACTIVE',"
+        " occurrence_count INTEGER NOT NULL DEFAULT 1, dedup_key TEXT NOT NULL,"
+        " created_at TEXT NOT NULL, last_seen_at TEXT NOT NULL)"
+    )
+    test_db.execute(
+        "INSERT INTO safety_alerts (device_id, domain, alert_type, severity,"
+        " title, description, rule_matched, explanation, status,"
+        " occurrence_count, dedup_key, created_at, last_seen_at)"
+        " VALUES ('dev_01', 'freexxxmovies.test', 'UNSAFE_CATEGORY', 'CRITICAL',"
+        " 't', 'd', 'KEYWORD:ADULT_EXPLICIT', 'e', 'ACTIVE', 1,"
+        " 'dev_01:UNSAFE_CATEGORY:freexxxmovies.test',"
+        " '2026-09-19 06:00:00', '2026-09-19 06:00:00')"
+    )
+    test_db.commit()
+    resp = client.get("/api/alerts")
+    assert resp.status_code == 200
+    row = next(a for a in resp.json() if a["domain"] == "freexxxmovies.test")
+    assert row["device_id"] == "dev_01"
+    assert row["device_name"] == "Router Gateway"
+
+
+_ALERT_DDL = (
+    "CREATE TABLE IF NOT EXISTS safety_alerts ("
+    " id INTEGER PRIMARY KEY AUTOINCREMENT,"
+    " device_id TEXT, domain TEXT NOT NULL, alert_type TEXT NOT NULL,"
+    " severity TEXT NOT NULL DEFAULT 'MEDIUM', title TEXT NOT NULL,"
+    " description TEXT NOT NULL, rule_matched TEXT NOT NULL,"
+    " explanation TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'ACTIVE',"
+    " occurrence_count INTEGER NOT NULL DEFAULT 1, dedup_key TEXT NOT NULL,"
+    " created_at TEXT NOT NULL, last_seen_at TEXT NOT NULL)"
+)
+
+
+def test_alerts_filter_by_domain(client: TestClient, test_db) -> None:
+    """The activity inspector links to alerts for one exact domain."""
+    test_db.execute(_ALERT_DDL)
+    test_db.execute(
+        "INSERT INTO safety_alerts (device_id, domain, alert_type, severity,"
+        " title, description, rule_matched, explanation, status,"
+        " occurrence_count, dedup_key, created_at, last_seen_at)"
+        " VALUES ('dev_02', 'cloudflare-dns.com', 'BYPASS_ATTEMPT', 'MEDIUM',"
+        " 't', 'd', 'RESOLVER:KNOWN_DOH_ENDPOINT', 'e', 'ACTIVE', 1,"
+        " 'k1', '2026-09-19 06:00:00', '2026-09-19 06:00:00'),"
+        " ('dev_02', 'example.com', 'UNSAFE_CATEGORY', 'CRITICAL',"
+        " 't', 'd', 'CATEGORY:ADULT_CONTENT', 'e', 'ACTIVE', 1,"
+        " 'k2', '2026-09-19 06:00:00', '2026-09-19 06:00:00')"
+    )
+    test_db.commit()
+    resp = client.get("/api/alerts?domain=cloudflare-dns.com")
+    assert resp.status_code == 200
+    rows = resp.json()
+    assert len(rows) == 1
+    assert rows[0]["rule_matched"] == "RESOLVER:KNOWN_DOH_ENDPOINT"

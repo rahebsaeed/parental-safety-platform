@@ -8,9 +8,10 @@ import {
   FolderKanban,
   Shield,
   Settings,
+  Globe,
 } from 'lucide-react';
 
-export type NavTab = 'overview' | 'devices' | 'alerts' | 'activity' | 'analytics' | 'classifications' | 'settings';
+export type NavTab = 'overview' | 'devices' | 'alerts' | 'activity' | 'web' | 'analytics' | 'classifications' | 'settings';
 
 interface Props {
   activeTab: NavTab;
@@ -33,6 +34,7 @@ export const Sidebar: React.FC<Props> = ({
       badge: activeAlertsCount > 0 ? activeAlertsCount : undefined,
     },
     { id: 'activity' as NavTab, label: 'Activity Log', icon: Activity },
+    { id: 'web' as NavTab, label: 'Web Requests', icon: Globe },
     { id: 'analytics' as NavTab, label: 'Analytics', icon: BarChart3 },
     { id: 'classifications' as NavTab, label: 'Domain Rules', icon: FolderKanban },
     { id: 'settings' as NavTab, label: 'Settings', icon: Settings },

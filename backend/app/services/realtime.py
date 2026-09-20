@@ -10,7 +10,9 @@ from fastapi import WebSocket, WebSocketDisconnect
 from sqlalchemy import select, desc
 from sqlalchemy.orm import Session
 
+from backend.app.classifiers.traffic_tags import tags_for_domain
 from backend.app.db.session import SessionLocal
+from backend.app.models.device import Device
 from backend.app.models.dns import DnsQuery
 from backend.app.models.alert import SafetyAlert
 from backend.app.models.device import DeviceStatusEvent
@@ -147,7 +149,12 @@ class SqliteChangeWatcher:
                             "domain": query.domain,
                             "query_type": query.query_type,
                             "response_status": query.response_status,
+                            "resolved_addresses": query.resolved_addresses,
                             "dns_visibility": query.dns_visibility,
+                            # Domain-only subset (no per-row classification
+                            # lookup in the hot poll loop); the list API
+                            # adds the stored category as well.
+                            "tags": tags_for_domain(query.domain),
                         },
                     )
 
@@ -161,11 +168,19 @@ class SqliteChangeWatcher:
 
                 for alert in new_alerts:
                     self._last_alert_id = alert.id
+                    device_name = None
+                    if alert.device_id:
+                        device_name = session.scalars(
+                            select(Device.friendly_name).where(
+                                Device.device_id == alert.device_id
+                            )
+                        ).first() or alert.device_id
                     await self.manager.broadcast(
                         "safety_alert",
                         {
                             "id": alert.id,
                             "device_id": alert.device_id,
+                            "device_name": device_name,
                             "domain": alert.domain,
                             "alert_type": alert.alert_type,
                             "severity": alert.severity,

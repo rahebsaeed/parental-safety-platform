@@ -29,7 +29,8 @@ Full service specification: [docs/architecture/phase-3-backend-api.md](../archit
 
 | Method & path | Purpose |
 |---|---|
-| `GET /api/activity?...` | **Paginated**: `{total, limit, offset, items[]}` — never a bare array; clients must read `.items` |
+| `GET /api/activity?...` | **Paginated**: `{total, limit, offset, items[]}` — never a bare array; clients must read `.items`. Items carry stored `category`, observable `tags` (DoH/VPN/Tor/SafeSearch), and non-IP answers (CNAME/MX/TXT) |
+| `GET /api/activity/types` | Observed DNS query types with counts (A, AAAA, HTTPS, PTR, …) for UI filters |
 
 ### Classifications (static rules + AI)
 
@@ -60,6 +61,7 @@ AI verdicts map onto rule categories (`UNSAFE`/`GAMBLING` → `ADULT_CONTENT`,
 | Method & path | Purpose |
 |---|---|
 | `GET /api/analytics/*` | Overview, categories, active-hours, timeline, export |
+| `GET /api/analytics/search-engines?device_id=&days=` | Per-device search-engine visits (engine, visits, timestamps, top "opened next" domains in the 10 min after each visit). DNS carries hostnames only — typed keywords are never visible; the response says so |
 | `GET /api/domains/security|dangerous|subjects` | Keyword baseline overridden by stored rules (AI/reviewed verdicts win; `ADULT_CONTENT` → Dangerous) |
 
 ### Router DNS failover
@@ -68,6 +70,9 @@ AI verdicts map onto rule categories (`UNSAFE`/`GAMBLING` → `ADULT_CONTENT`,
 |---|---|
 | `GET /api/router-dns/status` | Router-reported DNS (`mode`: `dnsmasq`/`router`/`custom`/`unknown`/`unreachable`) + 3h failsafe countdown (`max_hours`, `enabled_at`, `expires_at`, `seconds_remaining`) |
 | `POST /api/router-dns/mode` | `{"mode":"dnsmasq"\|"router"}` — manual switch via `scripts/router-dns.sh`; `dnsmasq` starts the failsafe deadline, `router` clears it |
+| `GET /api/proxy/requests?...` | Paginated explicit-proxy metadata (method, URL, status, title, sizes). Bodies/cookies never stored |
+| `GET /api/proxy/searches[?device_id=]` | Exact typed search keywords per device (proxy-visible only) |
+| `GET /api/proxy/ca.pem` | Parental CA certificate (public part) for device installation |
 
 ### OpenRouter AI
 

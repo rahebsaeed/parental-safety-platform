@@ -226,7 +226,7 @@ export const AlertsPage: React.FC = () => {
                 Target Domain: <strong style={{ fontFamily: 'var(--font-mono)', color: 'var(--text-primary)' }}>{alert.domain}</strong>
                 {alert.device_id && (
                   <span style={{ marginLeft: '1rem' }}>
-                    Device: <span style={{ color: 'var(--text-primary)' }}>{alert.device_id}</span>
+                    Device: <span style={{ color: 'var(--text-primary)' }}>{alert.device_name || alert.device_id}</span>
                   </span>
                 )}
               </div>

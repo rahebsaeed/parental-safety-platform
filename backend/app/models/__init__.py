@@ -4,6 +4,7 @@ from .dns import DnsQuery
 from .classification import DomainClassification
 from .alert import SafetyAlert
 from .audit import AuditLog
+from .proxy import ProxyRequest, ProxySearchTerm
 
 __all__ = [
     "Base",
@@ -14,4 +15,6 @@ __all__ = [
     "DomainClassification",
     "SafetyAlert",
     "AuditLog",
+    "ProxyRequest",
+    "ProxySearchTerm",
 ]

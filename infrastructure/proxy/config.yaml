@@ -1,0 +1,21 @@
+# Parental Safety web proxy options.
+# Loaded automatically from the confdir (see parental-monitor-proxy.service).
+#
+# ignore_hosts: TLS passes through UNDECRYPTED for these (still visible as
+# plain DNS lookups, but page content stays private). Entries are regexes
+# matched against the destination host — keep them SIMPLE: a broken value
+# here silently disables ALL interception, so never use anchors or
+# backslash-heavy patterns on the command line; edit this file instead.
+ignore_hosts:
+  # Apple (App Store / updates / iCloud break under interception)
+  - apple\.com
+  - icloud\.com
+  - mzstatic\.com
+  # Banking apps (money at stake — never intercept)
+  - attijariwafa
+  - bankofafrica
+  - bmcebank
+  - societegenerale
+  - cihbank
+  - creditagricole
+  - banque

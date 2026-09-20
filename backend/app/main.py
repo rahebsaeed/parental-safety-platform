@@ -23,6 +23,7 @@ from backend.app.api.routers import (
     auth_router,
     router_dns_router,
     openrouter_router,
+    proxy_router,
 )
 
 
@@ -75,6 +76,7 @@ def create_app() -> FastAPI:
     app.include_router(auth_router, prefix=settings.API_V1_STR)
     app.include_router(router_dns_router, prefix=settings.API_V1_STR)
     app.include_router(openrouter_router, prefix=settings.API_V1_STR)
+    app.include_router(proxy_router, prefix=settings.API_V1_STR)
 
     @app.get("/", include_in_schema=False)
     def root() -> RedirectResponse:

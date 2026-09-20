@@ -52,45 +52,74 @@ class DomainSecurity:
     reason: str
 
 
-# Keyword-based security classification
+# Keyword-based security classification.
+#
+# Matching discipline (learned from live false labels):
+# - SAFE fires ONLY on exact/suffix match against known-safe roots. Generic
+#   infrastructure tokens (cloud, cdn, api, analytics, news, shop, music…)
+#   must never mark a domain safe — sketchy sites hide behind them.
+# - Short DANGEROUS/RISKY tokens (bet, tor, vpn, gun, kkk, …) match on word
+#   boundaries only: raw substrings false-positive on "alphabet", "vector",
+#   "history", "storage", "monitor".
+import re as _re
+
 _DANGEROUS_KEYWORDS = [
-    "gambling", "casino", "porn", "adult", "xxx", "nsfw", "bet", "wagering",
-    "lottery", "slots", "poker", "casino", "hookah", "weed", "cannabis",
-    "heroin", "cocaine", "meth", "fentanyl", "opioid", "drug", "mdma",
-    "assault", "violence", "hitman", "kill", "suicide", "self-harm",
-    "knife", "gun", "weapon", "explosive", "bomb", "terrorist",
-    "racist", "hate", "supremacist", "nazi", "kkk", "white power",
+    "gambling", "casino", "porn", "adult", "xxx", "nsfw", "wagering",
+    "lottery", "slots", "poker", "hookah", "weed", "cannabis",
+    "heroin", "cocaine", "meth", "fentanyl", "opioid", "mdma",
+    "assault", "violence", "hitman", "suicide", "self-harm",
+    "knife", "weapon", "explosive", "bomb", "terrorist",
+    "racist", "supremacist", "nazi", "white power",
+    "hentai", "escort", "nude", "camgirl", "onlyfans", "fansly",
+    "1xbet", "melbet", "mostbet", "parimatch", "unibet",
+    "bet365", "betway", "draftkings", "pokerstars",
 ]
 
+# Short tokens matched with word boundaries (compiled below).
+_DANGEROUS_TOKENS = ("bet", "gun", "kkk", "kill", "hate", "drug", "bombs", "stake")
+
 _RISKY_KEYWORDS = [
-    "chat", "dating", "meet", "hookup", "random", "stranger", "anonymous",
-    "tinder", "bumble", "hinge", "dating", "relationship",
-    "dark", "shadow", "deep", "web",
+    "chat", "dating", "hookup", "stranger", "anonymous",
+    "tinder", "bumble", "hinge", "relationship",
+    "dark", "shadow",
     "crypto", "bitcoin", "ethereum", "trading", "forex",
     "steam", "gaming", "roblox", "fortnite", "minecraft",
     "tiktok", "instagram", "snapchat", "whatsapp", "telegram",
-    "reddit", "4chan", "9chan", "discord",
-    "cricfree", "stream", "watch", "free", "proxy",
-    "tor", "vpn", "proxy",
-    "instagram", "facebook", "twitter", "x.com",
+    "reddit", "4chan", "discord",
+    "cricfree", "proxy", "torrent",
+    "facebook", "twitter",
 ]
 
-_SAFE_KEYWORDS = [
-    "google", "youtube", "wikipedia", "github", "stackoverflow",
-    "wikipedia", "khan", "coursera", "edx", "udemy", "duolingo",
-    "amazon", "ebay", "shop", "store",
-    "news", "bbc", "cnn", "reuters", "nytimes",
-    "weather", "map", "google", "apple",
-    "microsoft", "office", "gmail", "outlook",
-    "health", "medical", "doctor", "hospital",
-    "education", "school", "university", "learning",
-    "music", "spotify", "netflix", "disney",
-    "news", "bbc", "cnn", "reuters",
-    "weather", "calendar", "timer",
-    "translate", "dictionary", "thesaurus",
-    "cloud", "cdn", "infrastructure",
-    "api", "analytics", "tracking",
+_RISKY_TOKENS = ("tor", "vpn", "proxy", "meet", "random", "stream", "watch", "free", "web", "deep", "dark")
+
+# Known-safe ROOTS — suffix/exact match only (never substrings).
+_SAFE_ROOTS = [
+    "google.com", "youtube.com", "youtu.be", "wikipedia.org", "github.com",
+    "stackoverflow.com", "stackexchange.com", "khanacademy.org",
+    "coursera.org", "edx.org", "udemy.com", "duolingo.com",
+    "bbc.com", "bbc.co.uk", "cnn.com", "reuters.com", "nytimes.com",
+    "gmail.com", "outlook.com", "office.com", "microsoft.com",
+    "apple.com", "icloud.com",
+    "spotify.com", "netflix.com", "disney.com", "disneyplus.com",
+    "ebay.com", "amazon.com",
+    "ubuntu.com", "canonical.com", "debian.org", "python.org",
+    "mozilla.org", "firefox.com",
 ]
+
+
+def _boundary_res(tokens: tuple[str, ...]) -> tuple["_re.Pattern", ...]:
+    return tuple(_re.compile(rf"\b{_re.escape(tok)}\b") for tok in tokens)
+
+
+_DANGEROUS_TOKEN_RES = _boundary_res(_DANGEROUS_TOKENS)
+_RISKY_TOKEN_RES = _boundary_res(_RISKY_TOKENS)
+
+
+def _is_safe_root(domain_lower: str) -> str | None:
+    for root in _SAFE_ROOTS:
+        if domain_lower == root or domain_lower.endswith("." + root):
+            return root
+    return None
 
 
 def classify_domain(domain: str) -> DomainSecurity:
@@ -99,16 +128,12 @@ def classify_domain(domain: str) -> DomainSecurity:
     Returns a DomainSecurity object with the security level, category,
     risk score, and reason.
     """
-    domain_lower = domain.lower().strip()
+    domain_lower = domain.lower().strip().strip(".")
     
-    # Remove leading www. and subdomains for classification
-    base_domain = domain_lower.replace("www.", "")
-    parts = base_domain.split(".")
-    base = parts[0] if parts else domain_lower
-    
-    # Check for dangerous keywords
+    # Check for dangerous keywords (substring for multi-char, boundaries
+    # for short tokens)
     for keyword in _DANGEROUS_KEYWORDS:
-        if keyword in base_domain or keyword in base:
+        if keyword in domain_lower:
             return DomainSecurity(
                 domain=domain,
                 security_level=SecurityLevel.DANGEROUS,
@@ -116,10 +141,19 @@ def classify_domain(domain: str) -> DomainSecurity:
                 risk_score=90,
                 reason=f"Matches dangerous keyword: '{keyword}'",
             )
+    for pattern in _DANGEROUS_TOKEN_RES:
+        if pattern.search(domain_lower):
+            return DomainSecurity(
+                domain=domain,
+                security_level=SecurityLevel.DANGEROUS,
+                category="ADULT_CONTENT",
+                risk_score=90,
+                reason=f"Matches dangerous keyword: '{pattern.pattern}'",
+            )
     
     # Check for risky keywords
     for keyword in _RISKY_KEYWORDS:
-        if keyword in base_domain or keyword in base:
+        if keyword in domain_lower:
             return DomainSecurity(
                 domain=domain,
                 security_level=SecurityLevel.RISKY,
@@ -127,17 +161,27 @@ def classify_domain(domain: str) -> DomainSecurity:
                 risk_score=50,
                 reason=f"Matches risky keyword: '{keyword}'",
             )
-    
-    # Check for safe keywords
-    for keyword in _SAFE_KEYWORDS:
-        if keyword in base_domain or keyword in base:
+    for pattern in _RISKY_TOKEN_RES:
+        if pattern.search(domain_lower):
             return DomainSecurity(
                 domain=domain,
-                security_level=SecurityLevel.SAFE,
-                category="PRODUCTIVITY",
-                risk_score=5,
-                reason=f"Matches safe keyword: '{keyword}'",
+                security_level=SecurityLevel.RISKY,
+                category="SOCIAL_MEDIA",
+                risk_score=50,
+                reason=f"Matches risky keyword: '{pattern.pattern}'",
             )
+    
+    # Safe ONLY on exact/suffix match against known-safe roots — never on
+    # generic substrings. Anything else stays honestly UNKNOWN.
+    safe_root = _is_safe_root(domain_lower)
+    if safe_root:
+        return DomainSecurity(
+            domain=domain,
+            security_level=SecurityLevel.SAFE,
+            category="PRODUCTIVITY",
+            risk_score=5,
+            reason=f"Matches known-safe domain: '{safe_root}'",
+        )
     
     # Default: unknown
     return DomainSecurity(

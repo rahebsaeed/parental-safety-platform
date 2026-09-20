@@ -60,6 +60,47 @@ CREATE TABLE audit_logs (
     target     TEXT,
     details    TEXT
 );
+
+CREATE TABLE domain_classifications (
+    domain       TEXT PRIMARY KEY,
+    category     TEXT NOT NULL DEFAULT 'UNCATEGORIZED',
+    rule_type    TEXT,
+    pattern      TEXT,
+    is_override  INTEGER NOT NULL DEFAULT 0,
+    note         TEXT,
+    classified_at TEXT
+);
+
+CREATE TABLE proxy_requests (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    occurred_at TEXT NOT NULL,
+    client_ip TEXT NOT NULL,
+    device_id TEXT,
+    method TEXT NOT NULL,
+    scheme TEXT NOT NULL DEFAULT 'https',
+    host TEXT NOT NULL,
+    port INTEGER NOT NULL DEFAULT 443,
+    path TEXT,
+    full_url TEXT NOT NULL,
+    user_agent TEXT,
+    referer TEXT,
+    req_content_type TEXT,
+    req_size INTEGER NOT NULL DEFAULT 0,
+    status_code INTEGER,
+    resp_content_type TEXT,
+    resp_size INTEGER NOT NULL DEFAULT 0,
+    page_title TEXT,
+    intercepted INTEGER NOT NULL DEFAULT 1
+);
+
+CREATE TABLE proxy_search_terms (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    occurred_at TEXT NOT NULL,
+    device_id TEXT,
+    engine TEXT NOT NULL,
+    keywords TEXT NOT NULL,
+    full_url TEXT NOT NULL
+);
 """
 
 
